@@ -1,4 +1,5 @@
 import streamlit as st
+import fitz
 import pdfplumber
 import pandas as pd
 import io
