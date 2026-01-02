@@ -1,10 +1,10 @@
 import streamlit as st
-import pandas as pd
 import fitz  # PyMuPDF
 import re
 from io import BytesIO
 import pytesseract
 from PIL import Image
+import pandas as pd
 
 # --------------------------------------------------
 # Page Config
@@ -15,10 +15,9 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# Helper Functions
+# PDF Text Extraction
 # --------------------------------------------------
 def extract_text_from_pdf(pdf_bytes):
-    """Extract text from PDF using PyMuPDF"""
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         text = ""
@@ -27,14 +26,12 @@ def extract_text_from_pdf(pdf_bytes):
         doc.close()
         return text
     except Exception as e:
-        st.error(f"Text extraction error: {e}")
+        st.error(f"Text extraction failed: {e}")
         return None
 
 
 def extract_text_with_ocr(pdf_bytes):
-    """OCR fallback using Tesseract"""
     try:
-        # Check Tesseract availability
         pytesseract.get_tesseract_version()
 
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -48,34 +45,29 @@ def extract_text_with_ocr(pdf_bytes):
         doc.close()
         return text
     except Exception as e:
-        st.error(f"OCR error: {e}")
+        st.error(f"OCR failed: {e}")
         return None
 
 
-def normalize(text):
-    return re.sub(r'[^a-z0-9]', '', text.lower())
+# --------------------------------------------------
+# Utility
+# --------------------------------------------------
+def normalize(txt):
+    return re.sub(r"[^a-z0-9]", "", txt.lower())
 
 
 def parse_customer_data(text):
-    """Parse extracted text into key-value pairs"""
     fields = [
-        "Type of Customer", "Name of Customer", "Company Code", "Customer Group",
-        "Sales Group", "Region", "Zone", "Sub Zone", "State", "Sales Office",
-        "SAP Dealer code to be mapped", "Search Term",
-        "Search Term 1- Old customer code", "Search Term 2 - District",
-        "Mobile Number", "E-Mail ID", "Lattitude", "Longitude",
-        "Address 1", "Address 2", "Address 3", "Address 4",
-        "PIN", "City", "District", "Whatsapp No.",
-        "Date of Birth", "Date of Anniversary",
-        "Is GST Present", "GSTIN", "Trade Name", "Legal Name",
-        "PAN", "PAN Holder Name", "PAN Status",
+        "Type of Customer", "Name of Customer", "Company Code",
+        "Customer Group", "Sales Group", "Region", "Zone", "Sub Zone",
+        "State", "Sales Office", "Mobile Number", "Whatsapp No.",
+        "E-Mail ID", "Address 1", "Address 2", "Address 3", "Address 4",
+        "City", "District", "PIN", "GSTIN", "PAN",
+        "PAN Holder Name", "PAN Status",
         "IFSC Number", "Account Number", "Bank Name", "Bank Branch",
         "Aadhaar Number", "Gender", "DOB",
-        "Logistics Transportation Zone", "Transportation Zone Code",
-        "Date of Appointment", "Delivering Plant", "Plant Name",
         "Credit Limit (In Rs.)", "Sales Officer to be mapped",
-        "Initiator Name", "Initiator Email ID",
-        "Final Result"
+        "Initiator Name", "Initiator Email ID", "Final Result"
     ]
 
     data = {}
@@ -97,44 +89,41 @@ def parse_customer_data(text):
     return data
 
 
-def create_excel_rowwise(dataframes_dict):
-    """Create Excel with ONLY row-wise format"""
+# --------------------------------------------------
+# Excel Creation (STRICT ROW-WISE)
+# --------------------------------------------------
+def create_excel_rowwise_only(all_data: dict):
     output = BytesIO()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for filename, df in dataframes_dict.items():
-            rows = []
+        for filename, record in all_data.items():
 
-            for col in df.columns:
-                value = df[col].iloc[0]
-                rows.append([col, "" if pd.isna(value) else value])
+            # 🔑 THIS is the key line (dict → rows)
+            df = pd.DataFrame(
+                list(record.items()),
+                columns=["Field Name", "Value"]
+            )
 
-            df_row = pd.DataFrame(rows, columns=["Field Name", "Value"])
             sheet_name = filename.replace(".pdf", "")[:31]
-            df_row.to_excel(writer, sheet_name=sheet_name, index=False)
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
 
             ws = writer.sheets[sheet_name]
             ws.column_dimensions["A"].width = 45
-            ws.column_dimensions["B"].width = 55
+            ws.column_dimensions["B"].width = 60
 
     output.seek(0)
     return output
 
 
-def display_rowwise(data_dict):
-    return pd.DataFrame(
-        [{"Field Name": k, "Value": v} for k, v in data_dict.items()]
-    )
-
 # --------------------------------------------------
 # UI
 # --------------------------------------------------
-st.title("📄 PDF to Excel Extractor (Row-wise)")
-st.write("Extract customer creation form data and download it in **row-wise Excel format**.")
+st.title("📄 PDF to Excel Extractor (Row-wise Only)")
+st.write("Extract customer data from PDFs and download **row-wise Excel output**.")
 
 with st.sidebar:
     st.header("⚙️ Options")
-    use_ocr = st.checkbox("Enable OCR (for scanned PDFs)", value=False)
+    use_ocr = st.checkbox("Enable OCR for scanned PDFs", value=False)
 
 uploaded_files = st.file_uploader(
     "Upload PDF file(s)",
@@ -149,9 +138,7 @@ if uploaded_files:
     st.success(f"{len(uploaded_files)} file(s) uploaded")
 
     if st.button("🚀 Extract Data", type="primary"):
-        dataframes_dict = {}
-        preview_data = {}
-
+        extracted_data = {}
         progress = st.progress(0)
 
         for idx, file in enumerate(uploaded_files):
@@ -165,9 +152,7 @@ if uploaded_files:
             if text:
                 parsed = parse_customer_data(text)
                 if parsed:
-                    df = pd.DataFrame([parsed])
-                    dataframes_dict[file.name] = df
-                    preview_data[file.name] = display_rowwise(parsed)
+                    extracted_data[file.name] = parsed
                 else:
                     st.warning(f"No data found in {file.name}")
             else:
@@ -176,19 +161,23 @@ if uploaded_files:
             progress.progress((idx + 1) / len(uploaded_files))
 
         # --------------------------------------------------
-        # Display Preview
+        # Preview
         # --------------------------------------------------
-        if dataframes_dict:
+        if extracted_data:
             st.success("✅ Extraction completed")
 
-            for fname, df_preview in preview_data.items():
-                with st.expander(f"📄 {fname}", expanded=len(preview_data) == 1):
-                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
+            for fname, record in extracted_data.items():
+                with st.expander(f"📄 {fname}", expanded=len(extracted_data) == 1):
+                    st.dataframe(
+                        pd.DataFrame(list(record.items()), columns=["Field Name", "Value"]),
+                        use_container_width=True,
+                        hide_index=True
+                    )
 
-            excel_file = create_excel_rowwise(dataframes_dict)
+            excel_file = create_excel_rowwise_only(extracted_data)
 
             st.download_button(
-                "📥 Download Excel (Row-wise)",
+                label="📥 Download Excel (Row-wise)",
                 data=excel_file,
                 file_name="customer_data_rowwise.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
