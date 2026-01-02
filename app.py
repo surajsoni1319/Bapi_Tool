@@ -187,19 +187,30 @@ def parse_customer_data(text):
     
     return data
 
+def create_row_format_display(data_dict):
+    """Create a DataFrame in row format (Field - Value pairs) for display"""
+    display_data = []
+    for field, value in data_dict.items():
+        display_data.append({
+            'Field Name': field,
+            '': '—',  # Separator
+            'Value': value if value else ''
+        })
+    return pd.DataFrame(display_data)
+
 def create_excel_file(dataframes_dict):
-    """Create Excel file with data from multiple PDFs"""
+    """Create Excel file with data from multiple PDFs in column format"""
     output = BytesIO()
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Combine all dataframes
+        # Combine all dataframes in column format (each customer as a row)
         if dataframes_dict:
             combined_df = pd.concat(dataframes_dict.values(), ignore_index=True)
             combined_df.to_excel(writer, sheet_name='All Customers', index=False)
             
-            # Individual sheets for each customer
+            # Individual sheets for each customer (also in column format)
             for filename, df in dataframes_dict.items():
-                sheet_name = filename[:30]  # Excel sheet name limit
+                sheet_name = filename.replace('.pdf', '')[:30]  # Excel sheet name limit
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
     
     output.seek(0)
@@ -225,7 +236,8 @@ with st.sidebar:
     - Extract text from PDF
     - OCR support for scanned documents
     - Multiple PDF processing
-    - Excel export with multiple sheets
+    - Row format preview (readable)
+    - Column format Excel export (standard)
     """)
 
 # File uploader
@@ -242,6 +254,7 @@ if uploaded_files:
     # Process button
     if st.button("🚀 Extract Data", type="primary"):
         dataframes_dict = {}
+        display_dataframes = {}
         
         # Progress bar
         progress_bar = st.progress(0)
@@ -263,13 +276,14 @@ if uploaded_files:
                 customer_data = parse_customer_data(text)
                 
                 if customer_data:
-                    # Convert to DataFrame
-                    df = pd.DataFrame([customer_data])
-                    dataframes_dict[uploaded_file.name] = df
+                    # Convert to DataFrame for Excel (column format)
+                    df_excel = pd.DataFrame([customer_data])
+                    dataframes_dict[uploaded_file.name] = df_excel
                     
-                    # Show preview
-                    with st.expander(f"📋 Preview: {uploaded_file.name}"):
-                        st.dataframe(df.T, use_container_width=True)
+                    # Create row format for display
+                    df_display = create_row_format_display(customer_data)
+                    display_dataframes[uploaded_file.name] = df_display
+                    
                 else:
                     st.warning(f"⚠️ No data extracted from {uploaded_file.name}")
             else:
@@ -280,23 +294,42 @@ if uploaded_files:
         
         status_text.text("✅ Processing complete!")
         
-        # Create and download Excel
+        # Display results
         if dataframes_dict:
             st.success(f"🎉 Successfully extracted data from {len(dataframes_dict)} file(s)!")
             
-            # Show combined preview
-            st.subheader("📊 Combined Data Preview")
-            combined_df = pd.concat(dataframes_dict.values(), ignore_index=True)
-            st.dataframe(combined_df, use_container_width=True)
-            
-            # Statistics
+            # Show statistics
             col1, col2, col3 = st.columns(3)
+            combined_df = pd.concat(dataframes_dict.values(), ignore_index=True)
             with col1:
                 st.metric("Total Records", len(combined_df))
             with col2:
                 st.metric("Total Fields", len(combined_df.columns))
             with col3:
                 st.metric("Files Processed", len(dataframes_dict))
+            
+            st.markdown("---")
+            
+            # Show individual file previews in ROW FORMAT
+            st.subheader("📋 Extracted Data Preview (Row Format)")
+            st.info("ℹ️ Data is displayed in row format below for easy reading. Excel export will be in column format.")
+            
+            for filename, df_display in display_dataframes.items():
+                with st.expander(f"📄 {filename}", expanded=len(display_dataframes) == 1):
+                    # Display in row format with custom styling
+                    st.dataframe(
+                        df_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(600, len(df_display) * 35 + 38)
+                    )
+            
+            st.markdown("---")
+            
+            # Show combined data preview in COLUMN FORMAT (as it will be in Excel)
+            with st.expander("📊 Combined Data Preview (Column Format - Excel View)"):
+                st.info("ℹ️ This is how your data will appear in the Excel file.")
+                st.dataframe(combined_df, use_container_width=True)
             
             # Download button
             excel_file = create_excel_file(dataframes_dict)
@@ -305,8 +338,11 @@ if uploaded_files:
                 data=excel_file,
                 file_name="customer_data_extracted.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
+                type="primary",
+                use_container_width=True
             )
+            
+            st.success("✅ Excel file contains data in standard column format with all customers!")
         else:
             st.error("❌ No data could be extracted from the uploaded files.")
 
@@ -316,8 +352,16 @@ with st.expander("📖 How to Use"):
     1. **Upload PDF Files**: Click on the file uploader and select one or more PDF files
     2. **Enable OCR (Optional)**: If your PDFs are scanned images, enable OCR in the sidebar
     3. **Extract Data**: Click the "Extract Data" button to process the files
-    4. **Preview**: Review the extracted data in the preview section
-    5. **Download**: Click "Download Excel File" to save the extracted data
+    4. **Preview**: Review the extracted data in row format (easy to read)
+    5. **Download**: Click "Download Excel File" to save the data in column format
+    
+    **Display Formats:**
+    - **Row Format (Preview)**: Field Name — Value (for easy reading on screen)
+    - **Column Format (Excel)**: Each field as a column header, each customer as a row (standard format)
+    
+    **Excel File Structure:**
+    - Sheet 1: "All Customers" - Combined data from all PDFs
+    - Sheet 2+: Individual sheets for each PDF file
     
     **Supported Fields:**
     - Customer information (Name, Type, Code, etc.)
