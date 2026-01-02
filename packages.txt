@@ -1,0 +1,5 @@
+build-essential
+libpoppler-cpp-dev
+poppler-utils
+python3-dev
+libffi-dev
