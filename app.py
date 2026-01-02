@@ -1,5 +1,5 @@
 import streamlit as st
-import pdfplumber
+import fitz  # PyMuPDF
 import pandas as pd
 import re
 from io import BytesIO
@@ -20,34 +20,39 @@ EXCLUDE_HEADERS = [
 ]
 
 def extract_data_from_pdf(pdf_file):
-    """Extract key-value pairs from PDF file"""
+    """Extract key-value pairs from PDF file using PyMuPDF"""
     data = {}
     
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            
-            if text:
-                lines = text.split('\n')
-                
-                for line in lines:
-                    # Skip empty lines and header lines
-                    line = line.strip()
-                    if not line or line in EXCLUDE_HEADERS:
-                        continue
-                    
-                    # Try to split by multiple spaces or tabs
-                    # Pattern: Field name followed by value
-                    parts = re.split(r'\s{2,}|\t+', line, maxsplit=1)
-                    
-                    if len(parts) == 2:
-                        key = parts[0].strip()
-                        value = parts[1].strip()
-                        
-                        # Skip if key is a header
-                        if key not in EXCLUDE_HEADERS and key and value:
-                            data[key] = value
+    # Read the PDF file
+    pdf_bytes = pdf_file.read()
+    pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     
+    for page_num in range(pdf_document.page_count):
+        page = pdf_document[page_num]
+        text = page.get_text()
+        
+        if text:
+            lines = text.split('\n')
+            
+            for line in lines:
+                # Skip empty lines and header lines
+                line = line.strip()
+                if not line or line in EXCLUDE_HEADERS:
+                    continue
+                
+                # Try to split by multiple spaces or tabs
+                # Pattern: Field name followed by value
+                parts = re.split(r'\s{2,}|\t+', line, maxsplit=1)
+                
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    
+                    # Skip if key is a header
+                    if key not in EXCLUDE_HEADERS and key and value:
+                        data[key] = value
+    
+    pdf_document.close()
     return data
 
 def convert_to_dataframe(data_dict):
@@ -76,6 +81,9 @@ if uploaded_file is not None:
     if st.button("Extract Data", type="primary"):
         with st.spinner("Extracting data from PDF..."):
             try:
+                # Reset file pointer
+                uploaded_file.seek(0)
+                
                 # Extract data
                 extracted_data = extract_data_from_pdf(uploaded_file)
                 
