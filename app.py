@@ -207,19 +207,27 @@ def create_excel_file(dataframes_dict, row_format=True):
             if row_format:
                 # Create row format for each customer in separate sheets
                 for idx, (filename, df) in enumerate(dataframes_dict.items(), 1):
-                    # Convert to row format
+                    # Convert to row format (Field Name and Value as rows)
                     row_data = []
                     for col in df.columns:
-                        row_data.append({
-                            'Field Name': col,
-                            'Value': df[col].iloc[0] if not df[col].isna().iloc[0] else ''
-                        })
-                    df_row = pd.DataFrame(row_data)
+                        value = df[col].iloc[0]
+                        # Handle NaN/None values
+                        if pd.isna(value):
+                            value = ''
+                        row_data.append([col, value])
+                    
+                    # Create DataFrame with Field Name and Value columns
+                    df_row = pd.DataFrame(row_data, columns=['Field Name', 'Value'])
                     
                     sheet_name = filename.replace('.pdf', '')[:30]  # Excel sheet name limit
                     df_row.to_excel(writer, sheet_name=sheet_name, index=False)
+                    
+                    # Auto-adjust column widths
+                    worksheet = writer.sheets[sheet_name]
+                    worksheet.column_dimensions['A'].width = 50
+                    worksheet.column_dimensions['B'].width = 50
                 
-                # Create a summary sheet with all customers in column format
+                # Create a summary sheet with all customers in column format for comparison
                 combined_df = pd.concat(dataframes_dict.values(), ignore_index=True)
                 combined_df.to_excel(writer, sheet_name='All Customers Summary', index=False)
             else:
@@ -410,4 +418,4 @@ with st.expander("📖 How to Use"):
 
 # Footer
 st.markdown("---")
-st.markdown("Made with ❤️ | Star Cement")
+st.markdown("Made with ❤️ using Streamlit | Powered by PyMuPDF & Tesseract OCR")
