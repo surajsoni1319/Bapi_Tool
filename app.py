@@ -1,194 +1,114 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import re
-from io import BytesIO
-import pytesseract
-from PIL import Image
 import pandas as pd
+from io import BytesIO
 
 # --------------------------------------------------
 # Page Config
 # --------------------------------------------------
-st.set_page_config(
-    page_title="PDF to Excel Extractor (Row-wise)",
-    layout="wide"
-)
+st.set_page_config(page_title="Layout Based PDF Extractor", layout="wide")
 
 # --------------------------------------------------
-# PDF Text Extraction
+# Layout-Based Extraction
 # --------------------------------------------------
-def extract_text_from_pdf(pdf_bytes):
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        text = ""
-        for page in doc:
-            text += page.get_text()
-        doc.close()
-        return text
-    except Exception as e:
-        st.error(f"Text extraction failed: {e}")
-        return None
+def extract_layout_rows(pdf_bytes, y_tolerance=3):
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    rows = []
+
+    for page in doc:
+        blocks = page.get_text("dict")["blocks"]
+
+        for block in blocks:
+            if "lines" not in block:
+                continue
+
+            for line in block["lines"]:
+                y = round(line["bbox"][1])
+
+                texts = []
+                for span in line["spans"]:
+                    texts.append({
+                        "text": span["text"].strip(),
+                        "x": span["bbox"][0],
+                        "y": y
+                    })
+
+                if len(texts) >= 2:
+                    rows.append(texts)
+
+    doc.close()
+    return rows
 
 
-def extract_text_with_ocr(pdf_bytes):
-    try:
-        pytesseract.get_tesseract_version()
+def detect_field_value_pairs(rows):
+    structured_data = {}
 
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        text = ""
+    for row in rows:
+        row = sorted(row, key=lambda x: x["x"])
 
-        for page in doc:
-            pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            text += pytesseract.image_to_string(img)
+        field = row[0]["text"]
+        value = " ".join([r["text"] for r in row[1:]])
 
-        doc.close()
-        return text
-    except Exception as e:
-        st.error(f"OCR failed: {e}")
-        return None
+        if field and value:
+            structured_data[field] = value
+
+    return structured_data
 
 
-# --------------------------------------------------
-# Utility
-# --------------------------------------------------
-def normalize(txt):
-    return re.sub(r"[^a-z0-9]", "", txt.lower())
-
-
-def parse_customer_data(text):
-    fields = [
-        "Type of Customer", "Name of Customer", "Company Code",
-        "Customer Group", "Sales Group", "Region", "Zone", "Sub Zone",
-        "State", "Sales Office", "Mobile Number", "Whatsapp No.",
-        "E-Mail ID", "Address 1", "Address 2", "Address 3", "Address 4",
-        "City", "District", "PIN", "GSTIN", "PAN",
-        "PAN Holder Name", "PAN Status",
-        "IFSC Number", "Account Number", "Bank Name", "Bank Branch",
-        "Aadhaar Number", "Gender", "DOB",
-        "Credit Limit (In Rs.)", "Sales Officer to be mapped",
-        "Initiator Name", "Initiator Email ID", "Final Result"
-    ]
-
-    data = {}
-    lines = text.split("\n")
-
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if not line:
-            continue
-
-        for field in fields:
-            if normalize(line).startswith(normalize(field)):
-                value = line[len(field):].strip(" :-")
-                if not value and i + 1 < len(lines):
-                    value = lines[i + 1].strip()
-                data[field] = value
-                break
-
-    return data
-
-
-# --------------------------------------------------
-# Excel Creation (STRICT ROW-WISE)
-# --------------------------------------------------
-def create_excel_rowwise_only(all_data: dict):
+def create_excel_rowwise(data):
     output = BytesIO()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for filename, record in all_data.items():
+        df = pd.DataFrame(
+            list(data.items()),
+            columns=["Field Name", "Value"]
+        )
+        df.to_excel(writer, sheet_name="Extracted Data", index=False)
 
-            # 🔑 THIS is the key line (dict → rows)
-            df = pd.DataFrame(
-                list(record.items()),
-                columns=["Field Name", "Value"]
-            )
-
-            sheet_name = filename.replace(".pdf", "")[:31]
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-            ws = writer.sheets[sheet_name]
-            ws.column_dimensions["A"].width = 45
-            ws.column_dimensions["B"].width = 60
+        ws = writer.sheets["Extracted Data"]
+        ws.column_dimensions["A"].width = 45
+        ws.column_dimensions["B"].width = 60
 
     output.seek(0)
     return output
 
-
 # --------------------------------------------------
 # UI
 # --------------------------------------------------
-st.title("📄 PDF to Excel Extractor (Row-wise Only)")
-st.write("Extract customer data from PDFs and download **row-wise Excel output**.")
+st.title("📄 Layout-Based PDF → Row-wise Excel")
+st.write("This uses **STRUCTURE DETECTION (coordinates)** like iLovePDF.")
 
-with st.sidebar:
-    st.header("⚙️ Options")
-    use_ocr = st.checkbox("Enable OCR for scanned PDFs", value=False)
+uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
 
-uploaded_files = st.file_uploader(
-    "Upload PDF file(s)",
-    type=["pdf"],
-    accept_multiple_files=True
-)
+if uploaded_file:
+    pdf_bytes = uploaded_file.read()
 
-# --------------------------------------------------
-# Processing
-# --------------------------------------------------
-if uploaded_files:
-    st.success(f"{len(uploaded_files)} file(s) uploaded")
+    if st.button("🚀 Extract Using Layout"):
+        layout_rows = extract_layout_rows(pdf_bytes)
 
-    if st.button("🚀 Extract Data", type="primary"):
-        extracted_data = {}
-        progress = st.progress(0)
+        structured_data = detect_field_value_pairs(layout_rows)
 
-        for idx, file in enumerate(uploaded_files):
-            pdf_bytes = file.read()
+        if structured_data:
+            st.success("Structure detected successfully")
 
-            text = extract_text_from_pdf(pdf_bytes)
+            st.subheader("📋 Detected Structure (Temp Data)")
+            st.dataframe(
+                pd.DataFrame(
+                    list(structured_data.items()),
+                    columns=["Field Name", "Value"]
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
 
-            if (not text or len(text.strip()) < 100) and use_ocr:
-                text = extract_text_with_ocr(pdf_bytes)
-
-            if text:
-                parsed = parse_customer_data(text)
-                if parsed:
-                    extracted_data[file.name] = parsed
-                else:
-                    st.warning(f"No data found in {file.name}")
-            else:
-                st.error(f"Failed to read {file.name}")
-
-            progress.progress((idx + 1) / len(uploaded_files))
-
-        # --------------------------------------------------
-        # Preview
-        # --------------------------------------------------
-        if extracted_data:
-            st.success("✅ Extraction completed")
-
-            for fname, record in extracted_data.items():
-                with st.expander(f"📄 {fname}", expanded=len(extracted_data) == 1):
-                    st.dataframe(
-                        pd.DataFrame(list(record.items()), columns=["Field Name", "Value"]),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-            excel_file = create_excel_rowwise_only(extracted_data)
+            excel = create_excel_rowwise(structured_data)
 
             st.download_button(
-                label="📥 Download Excel (Row-wise)",
-                data=excel_file,
-                file_name="customer_data_rowwise.xlsx",
+                "📥 Download Row-wise Excel",
+                data=excel,
+                file_name="layout_based_output.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                use_container_width=True
+                type="primary"
             )
         else:
-            st.error("No data could be extracted.")
-
-# --------------------------------------------------
-# Footer
-# --------------------------------------------------
-st.markdown("---")
-st.markdown("Built with Streamlit | PyMuPDF | Tesseract OCR")
+            st.error("No structure detected")
