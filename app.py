@@ -1,5 +1,5 @@
 import streamlit as st
-import fitz
+import fitz  # PyMuPDF
 import pandas as pd
 import io
 import re
@@ -17,34 +17,38 @@ def extract_pdf_data(pdf_file):
     
     data = []
     
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            
-            if text:
-                lines = text.split('\n')
-                
-                for line in lines:
-                    # Skip empty lines and header lines
-                    line = line.strip()
-                    if not line or line in skip_headers:
-                        continue
-                    
-                    # Try to split by multiple spaces or tabs
-                    # This pattern looks for key-value pairs
-                    parts = re.split(r'\s{2,}|\t+', line, maxsplit=1)
-                    
-                    if len(parts) == 2:
-                        key = parts[0].strip()
-                        value = parts[1].strip()
-                        
-                        # Skip if key is in skip headers
-                        if key not in skip_headers:
-                            data.append({
-                                'Field': key,
-                                'Value': value
-                            })
+    # Read PDF bytes
+    pdf_bytes = pdf_file.read()
+    pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     
+    for page_num in range(pdf_document.page_count):
+        page = pdf_document[page_num]
+        text = page.get_text()
+        
+        if text:
+            lines = text.split('\n')
+            
+            for line in lines:
+                # Skip empty lines and header lines
+                line = line.strip()
+                if not line or line in skip_headers:
+                    continue
+                
+                # Try to split by multiple spaces or tabs
+                parts = re.split(r'\s{2,}|\t+', line, maxsplit=1)
+                
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    
+                    # Skip if key is in skip headers
+                    if key not in skip_headers:
+                        data.append({
+                            'Field': key,
+                            'Value': value
+                        })
+    
+    pdf_document.close()
     return pd.DataFrame(data)
 
 def main():
