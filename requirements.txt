@@ -1,6 +1,6 @@
-PyMuPDF
+streamlit
 pandas
 openpyxl
-streamlit 
-pandas 
-pdfplumber
+PyMuPDF
+pytesseract
+Pillow
