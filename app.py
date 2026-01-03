@@ -9,122 +9,11 @@ st.set_page_config(page_title="PDF Customer Data Extractor", page_icon="📄", l
 
 # Title
 st.title("📄 PDF Customer Data Extractor")
+st.markdown("Extracts data in ilovepdf.com format")
 st.markdown("---")
 
-# All expected fields in order as they appear in PDF
-EXPECTED_FIELDS = [
-    "Type of Customer",
-    "Name of Customer",
-    "Company Code",
-    "Customer Group",
-    "Sales Group",
-    "Region",
-    "Zone",
-    "Sub Zone",
-    "State",
-    "Sales Office",
-    "SAP Dealer code to be mapped Search Term 2",
-    "Search Term 1- Old customer code",
-    "Search Term 2 - District",
-    "Mobile Number",
-    "E-Mail ID",
-    "Lattitude",
-    "Longitude",
-    "Name of the Customers (Trade Name or Legal Name)",
-    "Mobile Number",  # Second occurrence
-    "E-mail",
-    "Address 1",
-    "Address 2",
-    "Address 3",
-    "Address 4",
-    "PIN",
-    "City",
-    "District",
-    "State",  # Second occurrence
-    "Whatsapp No.",
-    "Date of Birth",
-    "Date of Anniversary",
-    "Counter Potential - Maximum",
-    "Counter Potential - Minimum",
-    "Is GST Present",
-    "GSTIN",
-    "Trade Name",
-    "Legal Name",
-    "Reg Date",
-    "City",  # Second occurrence
-    "Type",
-    "Building No.",
-    "District Code",
-    "State Code",
-    "Street",
-    "PIN Code",
-    "PAN",
-    "PAN Holder Name",
-    "PAN Status",
-    "PAN - Aadhaar Linking Status",
-    "IFSC Number",
-    "Account Number",
-    "Name of Account Holder",
-    "Bank Name",
-    "Bank Branch",
-    "Is Aadhaar Linked with Mobile?",
-    "Aadhaar Number",
-    "Name",
-    "Gender",
-    "DOB",
-    "Address",
-    "PIN",  # Third occurrence
-    "City",  # Third occurrence
-    "State",  # Third occurrence
-    "Logistics Transportation Zone",
-    "Transportation Zone Description",
-    "Transportation Zone Code",
-    "Postal Code",
-    "Logistics team to vet the T zone selected by Sales Officer",
-    "Selection of Available T Zones from T Zone Master list, if found.",
-    "If NEW T Zone need to be created, details to be provided by Logistics team",
-    "Date of Appointment",
-    "Delivering Plant",
-    "Plant Name",
-    "Plant Code",
-    "Incoterns",
-    "Incoterns",  # Second occurrence
-    "Incoterns Code",
-    "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer",
-    "Credit Limit (In Rs.)",
-    "Regional Head to be mapped",
-    "Zonal Head to be mapped",
-    "Sub-Zonal Head (RSM) to be mapped",
-    "Area Sales Manager to be mapped",
-    "Sales Officer to be mapped",
-    "Sales Promoter to be mapped",
-    "Sales Promoter Number",
-    "Internal control code",
-    "SAP CODE",
-    "Initiator Name",
-    "Initiator Email ID",
-    "Initiator Mobile Number",
-    "Created By Customer UserID",
-    "Sales Head Name",
-    "Sales Head Email",
-    "Sales Head Mobile Number",
-    "Extra2",
-    "PAN Result",
-    "Mobile Number Result",
-    "Email Result",
-    "GST Result",
-    "Final Result"
-]
-
-SECTION_HEADERS = [
-    'Customer Creation', 'Customer Address', 'GSTIN Details', 
-    'PAN Details', 'Bank Details', 'Aadhaar Details', 
-    'Supporting Document', 'Zone Details', 'Other Details', 
-    'Duplicity Check'
-]
-
 def extract_data_from_pdf(pdf_file):
-    """Extract data using simple line matching"""
+    """Extract PDF data as 2-column table like ilovepdf.com"""
     
     # Read PDF
     pdf_bytes = pdf_file.read()
@@ -138,101 +27,39 @@ def extract_data_from_pdf(pdf_file):
     
     pdf_document.close()
     
-    # Split by tabs and multiple spaces to get key-value pairs
+    # Split into lines
     lines = full_text.split('\n')
     
-    # Create raw table
-    raw_data = []
+    # Extract as table: Field | Value
+    table_data = []
+    
     for line in lines:
         line = line.strip()
-        if line and line not in SECTION_HEADERS:
-            # Split by tab or 2+ spaces
-            if '\t' in line:
-                parts = line.split('\t')
-            else:
-                parts = re.split(r'\s{2,}', line)
-            
-            if len(parts) >= 2:
-                field = parts[0].strip()
-                value = '\t'.join(parts[1:]).strip() if '\t' in line else ' '.join(parts[1:]).strip()
-                raw_data.append({'Field': field, 'Value': value})
-            elif len(parts) == 1:
-                raw_data.append({'Field': parts[0].strip(), 'Value': ''})
-    
-    # Create DataFrame from raw data
-    df = pd.DataFrame(raw_data)
-    
-    # Now map to expected output format
-    output_data = []
-    field_counts = {}  # Track occurrences of duplicate fields
-    
-    for expected_field in EXPECTED_FIELDS:
-        # Handle duplicate fields
-        base_field = expected_field
+        if not line:
+            continue
         
-        # For duplicate tracking
-        if expected_field in field_counts:
-            field_counts[expected_field] += 1
-            occurrence = field_counts[expected_field]
+        # Try to split by tab first (most reliable)
+        if '\t' in line:
+            parts = line.split('\t', 1)  # Split only on first tab
+            field = parts[0].strip()
+            value = parts[1].strip() if len(parts) > 1 else ""
+            table_data.append({'Field': field, 'Value': value})
+        
+        # Try to split by 2+ spaces
+        elif '  ' in line:
+            parts = re.split(r'\s{2,}', line, 1)  # Split only once
+            field = parts[0].strip()
+            value = parts[1].strip() if len(parts) > 1 else ""
+            table_data.append({'Field': field, 'Value': value})
+        
+        # Single item - it's a field with no value
         else:
-            field_counts[expected_field] = 1
-            occurrence = 1
-        
-        # Find matching row in extracted data
-        value = ""
-        
-        # Special handling for specific fields
-        if expected_field == "SAP Dealer code to be mapped Search Term 2":
-            # Look for SAP Dealer code pattern
-            matches = df[df['Field'].str.contains('SAP Dealer code', na=False, case=False)]
-            if not matches.empty:
-                value = matches.iloc[0]['Value']
-            # Also check for standalone number after "2"
-            if not value:
-                for i, row in df.iterrows():
-                    if row['Field'] == '2' and i + 1 < len(df):
-                        value = df.iloc[i + 1]['Field']
-                        break
-        
-        elif expected_field == "Name of the Customers (Trade Name or Legal Name)":
-            # Multi-line field
-            for i, row in df.iterrows():
-                if 'Name of the Customers' in row['Field']:
-                    # Check next few rows
-                    if i + 1 < len(df) and 'Legal Name' in df.iloc[i + 1]['Field']:
-                        value = df.iloc[i + 1]['Value']
-                        if not value and i + 2 < len(df):
-                            value = df.iloc[i + 2]['Field']
-                    break
-        
-        elif expected_field in ["Logistics team to vet the T zone selected by Sales Officer",
-                                "Selection of Available T Zones from T Zone Master list, if found.",
-                                "If NEW T Zone need to be created, details to be provided by Logistics team",
-                                "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"]:
-            # Multi-line field names
-            search_terms = {
-                "Logistics team to vet the T zone selected by Sales Officer": "Logistics team to vet",
-                "Selection of Available T Zones from T Zone Master list, if found.": "Selection of Available T Zones",
-                "If NEW T Zone need to be created, details to be provided by Logistics team": "If NEW T Zone",
-                "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer": "Security Deposit Amount"
-            }
-            search_term = search_terms.get(expected_field, expected_field)
-            matches = df[df['Field'].str.contains(search_term, na=False, case=False)]
-            if not matches.empty:
-                value = matches.iloc[0]['Value']
-        
-        else:
-            # Standard field matching - handle duplicates
-            matches = df[df['Field'] == base_field]
-            if not matches.empty:
-                if occurrence <= len(matches):
-                    value = matches.iloc[occurrence - 1]['Value']
-                else:
-                    value = matches.iloc[0]['Value']
-        
-        output_data.append({'Field': expected_field, 'Value': value})
+            table_data.append({'Field': line, 'Value': ""})
     
-    return pd.DataFrame(output_data), df
+    # Create DataFrame
+    df = pd.DataFrame(table_data)
+    
+    return df
 
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
@@ -246,12 +73,11 @@ def convert_df_to_excel(df):
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Options")
-    show_raw_extraction = st.checkbox("Show raw extraction", value=False)
     show_empty = st.checkbox("Show empty fields", value=True)
     show_stats = st.checkbox("Show statistics", value=True)
     st.markdown("---")
-    st.markdown("### 📊 Info")
-    st.info(f"Total fields: {len(EXPECTED_FIELDS)}")
+    st.markdown("### ℹ️ About")
+    st.info("Extracts PDF in same format as ilovepdf.com:\n\n2 columns: Field | Value")
 
 # File uploader
 uploaded_file = st.file_uploader("Choose a PDF file", type=['pdf'])
@@ -265,66 +91,70 @@ if uploaded_file is not None:
                 uploaded_file.seek(0)
                 
                 # Extract data
-                final_df, raw_df = extract_data_from_pdf(uploaded_file)
-                
-                # Show raw extraction if requested
-                if show_raw_extraction:
-                    st.subheader("🔍 Raw Extraction (Debug)")
-                    st.dataframe(raw_df, use_container_width=True, height=400)
-                    st.markdown("---")
+                df = extract_data_from_pdf(uploaded_file)
                 
                 # Filter empty if needed
-                display_df = final_df.copy()
+                display_df = df.copy()
                 if not show_empty:
                     display_df = display_df[display_df['Value'] != ""]
                 
-                filled_count = len(final_df[final_df['Value'] != ""])
-                total_count = len(final_df)
+                # Calculate stats
+                total_rows = len(df)
+                filled_rows = len(df[df['Value'] != ""])
+                empty_rows = total_rows - filled_rows
                 
-                st.success(f"✅ Successfully extracted data!")
+                st.success(f"✅ Successfully extracted {total_rows} rows!")
                 
                 if show_stats:
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Total Fields", total_count)
+                        st.metric("Total Rows", total_rows)
                     with col2:
-                        st.metric("Fields Filled", filled_count)
+                        st.metric("Filled Rows", filled_rows)
                     with col3:
-                        completion = (filled_count / total_count) * 100 if total_count > 0 else 0
-                        st.metric("Completion", f"{completion:.1f}%")
+                        st.metric("Empty Rows", empty_rows)
                 
                 st.subheader("📋 Extracted Data")
-                st.dataframe(display_df, use_container_width=True, height=500)
+                st.dataframe(display_df, use_container_width=True, height=600)
                 
                 st.subheader("📥 Download Options")
-                col1, col2, col3 = st.columns(3)
+                col1, col2 = st.columns(2)
                 
                 with col1:
-                    csv_data = convert_df_to_csv(final_df)
+                    csv_data = convert_df_to_csv(df)
                     st.download_button(
-                        "Download Final CSV",
+                        "📄 Download as CSV",
                         csv_data,
                         f"extracted_{uploaded_file.name.replace('.pdf', '')}.csv",
-                        "text/csv"
+                        "text/csv",
+                        use_container_width=True
                     )
                 
                 with col2:
-                    excel_data = convert_df_to_excel(final_df)
+                    excel_data = convert_df_to_excel(df)
                     st.download_button(
-                        "Download Final Excel",
+                        "📊 Download as Excel",
                         excel_data,
                         f"extracted_{uploaded_file.name.replace('.pdf', '')}.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
                     )
                 
-                with col3:
-                    raw_csv = convert_df_to_csv(raw_df)
-                    st.download_button(
-                        "Download Raw Extraction (Debug)",
-                        raw_csv,
-                        f"raw_{uploaded_file.name.replace('.pdf', '')}.csv",
-                        "text/csv"
-                    )
+                # Show comparison with ilovepdf format
+                with st.expander("🔍 Sample Comparison"):
+                    st.markdown("""
+                    ### Your extraction should look like:
+                    
+                    | Field | Value |
+                    |-------|-------|
+                    | Customer Creation | |
+                    | Type of Customer | ZSUB - RSSD Sub-Dealer |
+                    | Name of Customer | GULZAR HARDWARE |
+                    | Company Code | 1010 - SCL-STAR CEMENT LTD. |
+                    | ... | ... |
+                    
+                    **Section headers** (like "Customer Creation") are included with empty values.
+                    """)
                 
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
@@ -336,26 +166,41 @@ if uploaded_file is not None:
 else:
     st.info("👆 Upload a PDF file to begin extraction")
     
-    with st.expander("📖 Instructions"):
+    with st.expander("📖 How it works"):
         st.markdown("""
-        ### How to use:
-        1. Upload your customer creation PDF file
+        ### This tool extracts PDFs exactly like ilovepdf.com:
+        
+        **Output Format:**
+        - 2 columns: **Field** | **Value**
+        - Section headers included (Customer Creation, PAN Details, etc.)
+        - Empty fields show as blank values
+        - All rows preserved in order
+        
+        **What you get:**
+        - Same structure as ilovepdf.com
+        - Easy to compare with your reference
+        - Ready to use in Excel/CSV
+        
+        **Steps:**
+        1. Upload your PDF
         2. Click "Extract Data"
-        3. Enable "Show raw extraction" to see what was extracted
-        4. Review the final data in the table
-        5. Download as CSV or Excel
-        
-        ### Features:
-        - ✅ Extracts all 101 fields (including duplicates)
-        - ✅ Handles duplicate field names (Mobile Number, State, City, PIN, etc.)
-        - ✅ Shows raw extraction for debugging
-        - ✅ Exports to CSV or Excel
-        
-        ### Debug Tips:
-        - Enable "Show raw extraction" to see field-value pairs as extracted
-        - Compare with your PDF to identify issues
-        - Download raw extraction to analyze in Excel
+        3. Compare with your ilovepdf output
+        4. Download as CSV or Excel
         """)
+    
+    with st.expander("📋 Expected Format"):
+        st.code("""
+Field                          | Value
+-------------------------------|---------------------------
+Customer Creation              | 
+Type of Customer               | ZSUB - RSSD Sub-Dealer
+Name of Customer               | GULZAR HARDWARE
+Company Code                   | 1010 - SCL-STAR CEMENT LTD.
+Search Term 1- Old customer... | 
+Search Term 2 - District       | 
+Mobile Number                  | 8638595914
+E-Mail ID                      | 
+        """, language="text")
 
 st.markdown("---")
-st.markdown("Built with ❤️ using Streamlit")
+st.markdown("Built with ❤️ using Streamlit | Mimics ilovepdf.com extraction")
