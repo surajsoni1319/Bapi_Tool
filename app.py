@@ -11,39 +11,7 @@ st.set_page_config(page_title="PDF Customer Data Extractor", page_icon="📄", l
 st.title("📄 PDF Customer Data Extractor")
 st.markdown("---")
 
-# All field names that can appear in the PDF
-FIELD_NAMES = [
-    "Type of Customer", "Name of Customer", "Company Code", "Customer Group",
-    "Sales Group", "Region", "Zone", "Sub Zone", "State", "Sales Office",
-    "SAP Dealer code to be mapped Search Term", "Search Term 1- Old customer code",
-    "Search Term 2 - District", "Mobile Number", "E-Mail ID", "Lattitude", "Longitude",
-    "Name of the Customers (Trade Name or", "Legal Name)", "E-mail",
-    "Address 1", "Address 2", "Address 3", "Address 4", "PIN", "City", "District",
-    "Whatsapp No.", "Date of Birth", "Date of Anniversary",
-    "Counter Potential - Maximum", "Counter Potential - Minimum",
-    "Is GST Present", "GSTIN", "Trade Name", "Legal Name", "Reg Date",
-    "Type", "Building No.", "District Code", "State Code", "Street", "PIN Code",
-    "PAN", "PAN Holder Name", "PAN Status", "PAN - Aadhaar Linking Status",
-    "IFSC Number", "Account Number", "Name of Account Holder", "Bank Name", "Bank Branch",
-    "Is Aadhaar Linked with Mobile?", "Aadhaar Number", "Name", "Gender", "DOB", "Address",
-    "Logistics Transportation Zone", "Transportation Zone Description",
-    "Transportation Zone Code", "Postal Code",
-    "Logistics team to vet the T zone selected by", "Sales Officer",
-    "Selection of Available T Zones from T Zone", "Master list, if found.",
-    "If NEW T Zone need to be created, details to", "be provided by Logistics team",
-    "Date of Appointment", "Delivering Plant", "Plant Name", "Plant Code",
-    "Incoterns", "Incoterns Code",
-    "Security Deposit Amount details to filled up,", "as per checque received by Customer / Dealer",
-    "Credit Limit (In Rs.)", "Regional Head to be mapped", "Zonal Head to be mapped",
-    "Sub-Zonal Head (RSM) to be mapped", "Area Sales Manager to be mapped",
-    "Sales Officer to be mapped", "Sales Promoter to be mapped", "Sales Promoter Number",
-    "Internal control code", "SAP CODE", "Initiator Name", "Initiator Email ID",
-    "Initiator Mobile Number", "Created By Customer UserID", "Sales Head Name",
-    "Sales Head Email", "Sales Head Mobile Number", "Extra2", "Duplicity Check",
-    "PAN Result", "Mobile Number Result", "Email Result", "GST Result", "Final Result"
-]
-
-# Output column names (standardized)
+# Output column names
 OUTPUT_COLUMNS = [
     "Type of Customer", "Name of Customer", "Company Code", "Customer Group",
     "Sales Group", "Region", "Zone", "Sub Zone", "State", "Sales Office",
@@ -82,21 +50,14 @@ EXCLUDE_HEADERS = [
     'Duplicity Check'
 ]
 
-def is_field_name(text):
-    """Check if text is likely a field name"""
-    text = text.strip()
-    for field in FIELD_NAMES:
-        if text.startswith(field):
-            return True
-    return False
-
 def extract_data_from_pdf(pdf_file):
     """Extract key-value pairs from PDF file"""
-    data = {}
     
+    # Read PDF
     pdf_bytes = pdf_file.read()
     pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     
+    # Get all text
     full_text = ""
     for page_num in range(pdf_document.page_count):
         page = pdf_document[page_num]
@@ -104,570 +65,132 @@ def extract_data_from_pdf(pdf_file):
     
     pdf_document.close()
     
-    lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+    # Parse the text using regex patterns
+    data = {}
     
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        
-        # Skip headers
-        if line in EXCLUDE_HEADERS:
-            i += 1
-            continue
-        
-        # Check for specific field patterns
-        
-        # Type of Customer
-        if line.startswith("Type of Customer"):
-            value = line.replace("Type of Customer", "").strip()
-            data["Type of Customer"] = value
-        
-        # Name of Customer
-        elif line.startswith("Name of Customer"):
-            value = line.replace("Name of Customer", "").strip()
-            data["Name of Customer"] = value
-        
-        # Company Code
-        elif line.startswith("Company Code"):
-            value = line.replace("Company Code", "").strip()
-            data["Company Code"] = value
-        
-        # Customer Group
-        elif line.startswith("Customer Group"):
-            value = line.replace("Customer Group", "").strip()
-            data["Customer Group"] = value
-        
-        # Sales Group
-        elif line.startswith("Sales Group"):
-            value = line.replace("Sales Group", "").strip()
-            data["Sales Group"] = value
-        
-        # Region
-        elif line.startswith("Region") and not line.startswith("Regional"):
-            value = line.replace("Region", "").strip()
-            data["Region"] = value
-        
-        # Zone (but not Sub Zone or Transportation Zone)
-        elif line == "Zone" or (line.startswith("Zone") and not line.startswith("Sub Zone") and not line.startswith("Transportation Zone")):
-            value = line.replace("Zone", "").strip()
-            if not value and i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if not is_field_name(next_line):
-                    value = next_line
-                    i += 1
-            data["Zone"] = value
-        
-        # Sub Zone
-        elif line.startswith("Sub Zone"):
-            value = line.replace("Sub Zone", "").strip()
-            data["Sub Zone"] = value
-        
-        # State (multiple occurrences - handle first one for customer state)
-        elif line.startswith("State") and "State" not in data:
-            value = line.replace("State", "").strip()
-            if not value and i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if not is_field_name(next_line):
-                    value = next_line
-                    i += 1
-            data["State"] = value
-        
-        # Sales Office
-        elif line.startswith("Sales Office"):
-            value = line.replace("Sales Office", "").strip()
-            data["Sales Office"] = value
-        
-        # SAP Dealer code
-        elif line.startswith("SAP Dealer code to be mapped Search Term"):
-            # Skip next lines until we find the actual code
-            i += 1
-            while i < len(lines):
-                if lines[i].strip() and not is_field_name(lines[i]) and lines[i].strip() not in ["2", "Search Term"]:
-                    data["SAP Dealer code to be mapped Search Term 2"] = lines[i].strip()
-                    break
-                i += 1
-        
-        # Search Term 1
-        elif line.startswith("Search Term 1- Old customer code"):
-            value = line.replace("Search Term 1- Old customer code", "").strip()
-            if value and not is_field_name(value):
-                data["Search Term 1- Old customer code"] = value
-            else:
-                data["Search Term 1- Old customer code"] = ""
-        
-        # Search Term 2
-        elif line.startswith("Search Term 2 - District"):
-            value = line.replace("Search Term 2 - District", "").strip()
-            if value and not is_field_name(value):
-                data["Search Term 2 - District"] = value
-            else:
-                data["Search Term 2 - District"] = ""
-        
-        # Mobile Number (first occurrence)
-        elif line.startswith("Mobile Number") and "Mobile Number" not in data:
-            value = line.replace("Mobile Number", "").strip()
-            data["Mobile Number"] = value
-        
-        # E-Mail ID
-        elif line.startswith("E-Mail ID"):
-            value = line.replace("E-Mail ID", "").strip()
-            if value and not is_field_name(value):
-                data["E-Mail ID"] = value
-            else:
-                data["E-Mail ID"] = ""
-        
-        # Lattitude
-        elif line.startswith("Lattitude"):
-            value = line.replace("Lattitude", "").strip()
-            data["Lattitude"] = value
-        
-        # Longitude
-        elif line.startswith("Longitude"):
-            value = line.replace("Longitude", "").strip()
-            data["Longitude"] = value
-        
-        # Name of the Customers (multi-line)
-        elif line.startswith("Name of the Customers (Trade Name or"):
-            i += 1
-            if i < len(lines) and lines[i].startswith("Legal Name)"):
-                value = lines[i].replace("Legal Name)", "").strip()
-                data["Name of the Customers (Trade Name or Legal Name)"] = value
-        
-        # E-mail (different from E-Mail ID)
-        elif line == "E-mail":
-            if i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if not is_field_name(next_line):
-                    data["E-mail"] = next_line
-                    i += 1
-                else:
-                    data["E-mail"] = ""
-        
-        # Address fields
-        elif line.startswith("Address 1"):
-            value = line.replace("Address 1", "").strip()
-            data["Address 1"] = value
-        
-        elif line.startswith("Address 2"):
-            value = line.replace("Address 2", "").strip()
-            if value and not is_field_name(value):
-                data["Address 2"] = value
-            else:
-                data["Address 2"] = ""
-        
-        elif line.startswith("Address 3"):
-            value = line.replace("Address 3", "").strip()
-            if value and not is_field_name(value):
-                data["Address 3"] = value
-            else:
-                data["Address 3"] = ""
-        
-        elif line.startswith("Address 4"):
-            value = line.replace("Address 4", "").strip()
-            if value and not is_field_name(value):
-                data["Address 4"] = value
-            else:
-                data["Address 4"] = ""
-        
-        # PIN
-        elif line == "PIN" or (line.startswith("PIN") and not line.startswith("PIN Code")):
-            value = line.replace("PIN", "").strip()
-            if not value and i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if not is_field_name(next_line):
-                    value = next_line
-                    i += 1
-            data["PIN"] = value
-        
-        # City
-        elif line.startswith("City") and "City" not in data:
-            value = line.replace("City", "").strip()
-            data["City"] = value
-        
-        # District
-        elif line.startswith("District") and "District" not in data:
-            value = line.replace("District", "").strip()
-            data["District"] = value
-        
-        # Continue with other fields...
-        elif line.startswith("Whatsapp No."):
-            value = line.replace("Whatsapp No.", "").strip()
-            data["Whatsapp No."] = value
-        
-        elif line.startswith("Date of Birth"):
-            value = line.replace("Date of Birth", "").strip()
-            data["Date of Birth"] = value
-        
-        elif line.startswith("Date of Anniversary"):
-            value = line.replace("Date of Anniversary", "").strip()
-            data["Date of Anniversary"] = value
-        
-        elif line.startswith("Counter Potential - Maximum"):
-            value = line.replace("Counter Potential - Maximum", "").strip()
-            data["Counter Potential - Maximum"] = value
-        
-        elif line.startswith("Counter Potential - Minimum"):
-            value = line.replace("Counter Potential - Minimum", "").strip()
-            data["Counter Potential - Minimum"] = value
-        
-        elif line.startswith("Is GST Present"):
-            value = line.replace("Is GST Present", "").strip()
-            data["Is GST Present"] = value
-        
-        elif line == "GSTIN":
-            if i + 1 < len(lines) and not is_field_name(lines[i + 1]):
-                data["GSTIN"] = lines[i + 1]
-                i += 1
-            else:
-                data["GSTIN"] = ""
-        
-        elif line == "Trade Name" and "Trade Name" not in data:
-            if i + 1 < len(lines) and not is_field_name(lines[i + 1]):
-                data["Trade Name"] = lines[i + 1]
-                i += 1
-            else:
-                data["Trade Name"] = ""
-        
-        elif line == "Legal Name" and "Legal Name" not in data:
-            value = ""
-            if i + 1 < len(lines):
-                next_line = lines[i + 1]
-                if not is_field_name(next_line) and next_line != ")":
-                    value = next_line
-                    i += 1
-            data["Legal Name"] = value
-        
-        elif line.startswith("Reg Date"):
-            value = line.replace("Reg Date", "").strip()
-            if value and not is_field_name(value):
-                data["Reg Date"] = value
-            else:
-                data["Reg Date"] = ""
-        
-        elif line == "Type" and "Type" not in data:
-            if i + 1 < len(lines) and not is_field_name(lines[i + 1]):
-                data["Type"] = lines[i + 1]
-                i += 1
-            else:
-                data["Type"] = ""
-        
-        elif line.startswith("Building No."):
-            value = line.replace("Building No.", "").strip()
-            if value and not is_field_name(value):
-                data["Building No."] = value
-            else:
-                data["Building No."] = ""
-        
-        elif line.startswith("District Code"):
-            value = line.replace("District Code", "").strip()
-            if value and not is_field_name(value):
-                data["District Code"] = value
-            else:
-                data["District Code"] = ""
-        
-        elif line.startswith("State Code"):
-            value = line.replace("State Code", "").strip()
-            if value and not is_field_name(value):
-                data["State Code"] = value
-            else:
-                data["State Code"] = ""
-        
-        elif line.startswith("Street"):
-            value = line.replace("Street", "").strip()
-            if value and not is_field_name(value):
-                data["Street"] = value
-            else:
-                data["Street"] = ""
-        
-        elif line.startswith("PIN Code"):
-            value = line.replace("PIN Code", "").strip()
-            if value and not is_field_name(value):
-                data["PIN Code"] = value
-            else:
-                data["PIN Code"] = ""
-        
-        elif line.startswith("PAN") and not line.startswith("PAN Holder") and not line.startswith("PAN Status") and not line.startswith("PAN -"):
-            value = line.replace("PAN", "").strip()
-            data["PAN"] = value
-        
-        elif line.startswith("PAN Holder Name"):
-            value = line.replace("PAN Holder Name", "").strip()
-            data["PAN Holder Name"] = value
-        
-        elif line.startswith("PAN Status"):
-            value = line.replace("PAN Status", "").strip()
-            data["PAN Status"] = value
-        
-        elif line.startswith("PAN - Aadhaar Linking Status"):
-            value = line.replace("PAN - Aadhaar Linking Status", "").strip()
-            data["PAN - Aadhaar Linking Status"] = value
-        
-        elif line.startswith("IFSC Number"):
-            value = line.replace("IFSC Number", "").strip()
-            data["IFSC Number"] = value
-        
-        elif line.startswith("Account Number"):
-            value = line.replace("Account Number", "").strip()
-            data["Account Number"] = value
-        
-        elif line.startswith("Name of Account Holder"):
-            value = line.replace("Name of Account Holder", "").strip()
-            data["Name of Account Holder"] = value
-        
-        elif line.startswith("Bank Name"):
-            value = line.replace("Bank Name", "").strip()
-            data["Bank Name"] = value
-        
-        elif line.startswith("Bank Branch"):
-            value = line.replace("Bank Branch", "").strip()
-            data["Bank Branch"] = value
-        
-        elif line.startswith("Is Aadhaar Linked with Mobile?"):
-            value = line.replace("Is Aadhaar Linked with Mobile?", "").strip()
-            data["Is Aadhaar Linked with Mobile?"] = value
-        
-        elif line.startswith("Aadhaar Number"):
-            value = line.replace("Aadhaar Number", "").strip()
-            data["Aadhaar Number"] = value
-        
-        elif line == "Name" and "Name" not in data:
-            if i + 1 < len(lines) and not is_field_name(lines[i + 1]):
-                data["Name"] = lines[i + 1]
-                i += 1
-            else:
-                data["Name"] = ""
-        
-        elif line.startswith("Gender"):
-            value = line.replace("Gender", "").strip()
-            data["Gender"] = value
-        
-        elif line.startswith("DOB"):
-            value = line.replace("DOB", "").strip()
-            data["DOB"] = value
-        
-        elif line == "Address" and "Address" not in data:
-            if i + 1 < len(lines) and not is_field_name(lines[i + 1]):
-                # Collect multiple lines for address if needed
-                address_parts = []
-                i += 1
-                while i < len(lines) and not is_field_name(lines[i]):
-                    address_parts.append(lines[i])
-                    i += 1
-                    if len(address_parts) >= 2:  # Limit address lines
-                        break
-                data["Address"] = " ".join(address_parts)
-                i -= 1  # Step back one since we'll increment at the end
-            else:
-                data["Address"] = ""
-        
-        elif line.startswith("Logistics Transportation Zone"):
-            value = line.replace("Logistics Transportation Zone", "").strip()
-            data["Logistics Transportation Zone"] = value
-        
-        elif line.startswith("Transportation Zone Description"):
-            value = line.replace("Transportation Zone Description", "").strip()
-            data["Transportation Zone Description"] = value
-        
-        elif line.startswith("Transportation Zone Code"):
-            value = line.replace("Transportation Zone Code", "").strip()
-            data["Transportation Zone Code"] = value
-        
-        elif line.startswith("Postal Code"):
-            value = line.replace("Postal Code", "").strip()
-            if value and not is_field_name(value):
-                data["Postal Code"] = value
-            else:
-                data["Postal Code"] = ""
-        
-        elif line.startswith("Logistics team to vet the T zone selected by"):
-            i += 1
-            if i < len(lines) and lines[i] == "Sales Officer":
-                i += 1
-                if i < len(lines) and not is_field_name(lines[i]):
-                    data["Logistics team to vet the T zone selected by Sales Officer"] = lines[i]
-                else:
-                    data["Logistics team to vet the T zone selected by Sales Officer"] = ""
-        
-        elif line.startswith("Selection of Available T Zones from T Zone"):
-            i += 1
-            if i < len(lines) and lines[i].startswith("Master list"):
-                i += 1
-                if i < len(lines) and not is_field_name(lines[i]):
-                    data["Selection of Available T Zones from T Zone Master list, if found."] = lines[i]
-                else:
-                    data["Selection of Available T Zones from T Zone Master list, if found."] = ""
-        
-        elif line.startswith("If NEW T Zone need to be created, details to"):
-            i += 1
-            if i < len(lines) and lines[i].startswith("be provided"):
-                i += 1
-                if i < len(lines) and not is_field_name(lines[i]):
-                    data["If NEW T Zone need to be created, details to be provided by Logistics team"] = lines[i]
-                else:
-                    data["If NEW T Zone need to be created, details to be provided by Logistics team"] = ""
-        
-        elif line.startswith("Date of Appointment"):
-            value = line.replace("Date of Appointment", "").strip()
-            data["Date of Appointment"] = value
-        
-        elif line.startswith("Delivering Plant"):
-            value = line.replace("Delivering Plant", "").strip()
-            data["Delivering Plant"] = value
-        
-        elif line.startswith("Plant Name"):
-            value = line.replace("Plant Name", "").strip()
-            data["Plant Name"] = value
-        
-        elif line.startswith("Plant Code"):
-            value = line.replace("Plant Code", "").strip()
-            data["Plant Code"] = value
-        
-        elif line.startswith("Incoterns") and not line.startswith("Incoterns Code"):
-            value = line.replace("Incoterns", "").strip()
-            data["Incoterns"] = value
-        
-        elif line.startswith("Incoterns Code"):
-            value = line.replace("Incoterns Code", "").strip()
-            if value and not is_field_name(value):
-                data["Incoterns Code"] = value
-            else:
-                data["Incoterns Code"] = ""
-        
-        elif line.startswith("Security Deposit Amount details to filled up,"):
-            i += 1
-            if i < len(lines) and lines[i].startswith("as per"):
-                i += 1
-                if i < len(lines) and not is_field_name(lines[i]):
-                    data["Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"] = lines[i]
-                else:
-                    data["Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"] = ""
-        
-        elif line.startswith("Credit Limit (In Rs.)"):
-            value = line.replace("Credit Limit (In Rs.)", "").strip()
-            if value and not is_field_name(value):
-                data["Credit Limit (In Rs.)"] = value
-            else:
-                data["Credit Limit (In Rs.)"] = ""
-        
-        elif line.startswith("Regional Head to be mapped"):
-            value = line.replace("Regional Head to be mapped", "").strip()
-            if value and not is_field_name(value):
-                data["Regional Head to be mapped"] = value
-            else:
-                data["Regional Head to be mapped"] = ""
-        
-        elif line.startswith("Zonal Head to be mapped"):
-            value = line.replace("Zonal Head to be mapped", "").strip()
-            data["Zonal Head to be mapped"] = value
-        
-        elif line.startswith("Sub-Zonal Head (RSM) to be mapped"):
-            value = line.replace("Sub-Zonal Head (RSM) to be mapped", "").strip()
-            data["Sub-Zonal Head (RSM) to be mapped"] = value
-        
-        elif line.startswith("Area Sales Manager to be mapped"):
-            value = line.replace("Area Sales Manager to be mapped", "").strip()
-            data["Area Sales Manager to be mapped"] = value
-        
-        elif line.startswith("Sales Officer to be mapped"):
-            value = line.replace("Sales Officer to be mapped", "").strip()
-            if value and not is_field_name(value):
-                data["Sales Officer to be mapped"] = value
-            else:
-                data["Sales Officer to be mapped"] = ""
-        
-        elif line.startswith("Sales Promoter to be mapped"):
-            value = line.replace("Sales Promoter to be mapped", "").strip()
-            if value and not is_field_name(value):
-                data["Sales Promoter to be mapped"] = value
-            else:
-                data["Sales Promoter to be mapped"] = ""
-        
-        elif line.startswith("Sales Promoter Number"):
-            value = line.replace("Sales Promoter Number", "").strip()
-            if value and not is_field_name(value):
-                data["Sales Promoter Number"] = value
-            else:
-                data["Sales Promoter Number"] = ""
-        
-        elif line.startswith("Internal control code"):
-            value = line.replace("Internal control code", "").strip()
-            data["Internal control code"] = value
-        
-        elif line.startswith("SAP CODE"):
-            value = line.replace("SAP CODE", "").strip()
-            if value and not is_field_name(value):
-                data["SAP CODE"] = value
-            else:
-                data["SAP CODE"] = ""
-        
-        elif line.startswith("Initiator Name"):
-            value = line.replace("Initiator Name", "").strip()
-            data["Initiator Name"] = value
-        
-        elif line.startswith("Initiator Email ID"):
-            value = line.replace("Initiator Email ID", "").strip()
-            data["Initiator Email ID"] = value
-        
-        elif line.startswith("Initiator Mobile Number"):
-            value = line.replace("Initiator Mobile Number", "").strip()
-            data["Initiator Mobile Number"] = value
-        
-        elif line.startswith("Created By Customer UserID"):
-            value = line.replace("Created By Customer UserID", "").strip()
-            data["Created By Customer UserID"] = value
-        
-        elif line.startswith("Sales Head Name"):
-            value = line.replace("Sales Head Name", "").strip()
-            data["Sales Head Name"] = value
-        
-        elif line.startswith("Sales Head Email"):
-            value = line.replace("Sales Head Email", "").strip()
-            data["Sales Head Email"] = value
-        
-        elif line.startswith("Sales Head Mobile Number"):
-            value = line.replace("Sales Head Mobile Number", "").strip()
-            data["Sales Head Mobile Number"] = value
-        
-        elif line.startswith("Extra2"):
-            value = line.replace("Extra2", "").strip()
-            if value and not is_field_name(value):
-                data["Extra2"] = value
-            else:
-                data["Extra2"] = ""
-        
-        elif line.startswith("PAN Result"):
-            value = line.replace("PAN Result", "").strip()
-            if value and not is_field_name(value):
-                data["PAN Result"] = value
-            else:
-                data["PAN Result"] = ""
-        
-        elif line.startswith("Mobile Number Result"):
-            value = line.replace("Mobile Number Result", "").strip()
-            if value and not is_field_name(value):
-                data["Mobile Number Result"] = value
-            else:
-                data["Mobile Number Result"] = ""
-        
-        elif line.startswith("Email Result"):
-            value = line.replace("Email Result", "").strip()
-            if value and not is_field_name(value):
-                data["Email Result"] = value
-            else:
-                data["Email Result"] = ""
-        
-        elif line.startswith("GST Result"):
-            value = line.replace("GST Result", "").strip()
-            if value and not is_field_name(value):
-                data["GST Result"] = value
-            else:
-                data["GST Result"] = ""
-        
-        elif line.startswith("Final Result"):
-            value = line.replace("Final Result", "").strip()
-            data["Final Result"] = value
-        
-        i += 1
+    # Simple extraction patterns - field name followed by value on same line
+    patterns = {
+        "Type of Customer": r"Type of Customer\s+(.+?)(?=\n|$)",
+        "Name of Customer": r"Name of Customer\s+(.+?)(?=\n|$)",
+        "Company Code": r"Company Code\s+(.+?)(?=\n|$)",
+        "Customer Group": r"Customer Group\s+(.+?)(?=\n|$)",
+        "Sales Group": r"Sales Group\s+(.+?)(?=\n|$)",
+        "Region": r"Region\s+([A-Z0-9]+)(?=\n|$)",
+        "Zone": r"^Zone\s+([A-Z0-9]+)(?=\n|$)",
+        "Sub Zone": r"Sub Zone\s+(.+?)(?=\n|$)",
+        "Sales Office": r"Sales Office\s+(.+?)(?=\n|$)",
+        "Mobile Number": r"^Mobile Number\s+(\d+)",
+        "Lattitude": r"Lattitude\s+([\d.]+)",
+        "Longitude": r"Longitude\s+([\d.]+)",
+        "Address 1": r"Address 1\s+(.+?)(?=\n|$)",
+        "PIN": r"^PIN\s+(\d+)",
+        "City": r"^City\s+(\w+)",
+        "District": r"^District\s+(\w+)",
+        "Whatsapp No.": r"Whatsapp No\.\s+(\d+)",
+        "Date of Birth": r"Date of Birth\s+([\d-/]+)",
+        "Date of Anniversary": r"Date of Anniversary\s+([\d-/]+)",
+        "Counter Potential - Maximum": r"Counter Potential - Maximum\s+(\d+)",
+        "Counter Potential - Minimum": r"Counter Potential - Minimum\s+(\d+)",
+        "Is GST Present": r"Is GST Present\s+(\w+)",
+        "PAN": r"^PAN\s+([A-Z0-9]+)(?=\n|$)",
+        "PAN Holder Name": r"PAN Holder Name\s+(.+?)(?=\n|$)",
+        "PAN Status": r"PAN Status\s+(\w+)",
+        "PAN - Aadhaar Linking Status": r"PAN - Aadhaar Linking Status\s+(\w+)",
+        "IFSC Number": r"IFSC Number\s+([A-Z0-9]+)",
+        "Account Number": r"Account Number\s+(\d+)",
+        "Name of Account Holder": r"Name of Account Holder\s+(.+?)(?=\n|$)",
+        "Bank Name": r"Bank Name\s+(.+?)(?=\n|$)",
+        "Bank Branch": r"Bank Branch\s+(.+?)(?=\n|$)",
+        "Is Aadhaar Linked with Mobile?": r"Is Aadhaar Linked with Mobile\?\s+(\w+)",
+        "Aadhaar Number": r"Aadhaar Number\s+(.+?)(?=\n|$)",
+        "Gender": r"Gender\s+(\w+)",
+        "DOB": r"^DOB\s+([\d/]+)",
+        "Logistics Transportation Zone": r"Logistics Transportation Zone\s+(.+?)(?=\n|$)",
+        "Transportation Zone Description": r"Transportation Zone Description\s+(.+?)(?=\n|$)",
+        "Transportation Zone Code": r"Transportation Zone Code\s+(\d+)",
+        "Date of Appointment": r"Date of Appointment\s+([\d-]+)",
+        "Delivering Plant": r"Delivering Plant\s+(.+?)(?=\n|$)",
+        "Plant Name": r"Plant Name\s+(.+?)(?=\n|$)",
+        "Plant Code": r"Plant Code\s+(\w+)",
+        "Incoterns": r"^Incoterns\s+(.+?)(?=\n|$)",
+        "Regional Head to be mapped": r"Regional Head to be mapped\s+(\w+)",
+        "Zonal Head to be mapped": r"Zonal Head to be mapped\s+(\w+)",
+        "Sub-Zonal Head (RSM) to be mapped": r"Sub-Zonal Head \(RSM\) to be mapped\s+(\w+)",
+        "Area Sales Manager to be mapped": r"Area Sales Manager to be mapped\s+(\w+)",
+        "Sales Officer to be mapped": r"Sales Officer to be mapped\s+(\w+)",
+        "Internal control code": r"Internal control code\s+(\w+)",
+        "Initiator Name": r"Initiator Name\s+(.+?)(?=\n|$)",
+        "Initiator Email ID": r"Initiator Email ID\s+(.+?)(?=\n|$)",
+        "Initiator Mobile Number": r"Initiator Mobile Number\s+(\d+)",
+        "Created By Customer UserID": r"Created By Customer UserID\s+(\w+)",
+        "Sales Head Name": r"Sales Head Name\s+(.+?)(?=\n|$)",
+        "Sales Head Email": r"Sales Head Email\s+(.+?)(?=\n|$)",
+        "Sales Head Mobile Number": r"Sales Head Mobile Number\s+(\d+)",
+        "Final Result": r"Final Result\s+(\w+)",
+    }
+    
+    # Extract using patterns
+    for field, pattern in patterns.items():
+        match = re.search(pattern, full_text, re.MULTILINE)
+        if match:
+            data[field] = match.group(1).strip()
+    
+    # Special handling for multi-line fields
+    
+    # State - first occurrence
+    state_match = re.search(r"^State\s+([A-Z]+)", full_text, re.MULTILINE)
+    if state_match:
+        data["State"] = state_match.group(1)
+    
+    # SAP Dealer code (has number separator)
+    sap_match = re.search(r"SAP Dealer code to be mapped Search Term\s*\n\s*2\s*\n\s*(\d+)", full_text)
+    if sap_match:
+        data["SAP Dealer code to be mapped Search Term 2"] = sap_match.group(1)
+    
+    # Name of Customers (multi-line)
+    name_match = re.search(r"Name of the Customers \(Trade Name or\s*\n\s*Legal Name\)\s*\n?\s*(.+?)(?=\n|$)", full_text)
+    if name_match:
+        data["Name of the Customers (Trade Name or Legal Name)"] = name_match.group(1).strip()
+    
+    # Name (in Aadhaar section)
+    name_aadhaar = re.search(r"Aadhaar Number.+?\n\s*Name\s+(.+?)(?=\n|$)", full_text, re.DOTALL)
+    if name_aadhaar:
+        data["Name"] = name_aadhaar.group(1).strip()
+    
+    # Address (multi-line in Aadhaar section)
+    address_match = re.search(r"DOB\s+[\d/]+\s*\n\s*Address\s+(.+?)(?=\n\s*PIN|$)", full_text, re.DOTALL)
+    if address_match:
+        data["Address"] = address_match.group(1).strip()
+    
+    # Logistics team field
+    logistics_match = re.search(r"Logistics team to vet the T zone selected by\s*\n\s*Sales Officer\s*\n?\s*(\w+)", full_text)
+    if logistics_match:
+        data["Logistics team to vet the T zone selected by Sales Officer"] = logistics_match.group(1)
+    
+    # Selection of T Zones
+    tzone_match = re.search(r"Selection of Available T Zones from T Zone\s*\n\s*Master list, if found\.\s*\n?\s*(.+?)(?=\n|$)", full_text)
+    if tzone_match:
+        data["Selection of Available T Zones from T Zone Master list, if found."] = tzone_match.group(1).strip()
+    
+    # Incoterns Code
+    inco_code = re.search(r"Incoterns Code\s+([A-Z]+)", full_text)
+    if inco_code:
+        data["Incoterns Code"] = inco_code.group(1)
+    
+    # Security Deposit
+    security_match = re.search(r"Security Deposit Amount details to filled up,\s*\n\s*as per checque received by Customer / Dealer\s*\n?\s*(\d+)", full_text)
+    if security_match:
+        data["Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"] = security_match.group(1)
+    
+    # PAN Result
+    pan_result = re.search(r"PAN Result\s+([A-Z])", full_text)
+    if pan_result:
+        data["PAN Result"] = pan_result.group(1)
+    
+    # Mobile Number Result
+    mobile_result = re.search(r"Mobile Number Result\s+([A-Z])", full_text)
+    if mobile_result:
+        data["Mobile Number Result"] = mobile_result.group(1)
     
     return data
 
