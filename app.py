@@ -50,6 +50,18 @@ EXCLUDE_HEADERS = [
     'Duplicity Check'
 ]
 
+def extract_value_after_field(text, field_name):
+    """Extract value that comes after a field name"""
+    # Try pattern: Field Name   Value (on same line)
+    pattern = re.escape(field_name) + r'\s+(.+?)(?=\n|$)'
+    match = re.search(pattern, text, re.MULTILINE)
+    if match:
+        value = match.group(1).strip()
+        # Make sure it's not another field name
+        if not any(value.startswith(h) for h in EXCLUDE_HEADERS):
+            return value
+    return ""
+
 def extract_data_from_pdf(pdf_file):
     """Extract key-value pairs from PDF file"""
     
@@ -65,188 +77,186 @@ def extract_data_from_pdf(pdf_file):
     
     pdf_document.close()
     
-    # Use pdfplumber-style table extraction
+    # Dictionary to store extracted data
     data = {}
     
-    # Split into lines and process
-    lines = full_text.split('\n')
+    # Extract each field
+    data["Type of Customer"] = extract_value_after_field(full_text, "Type of Customer")
+    data["Name of Customer"] = extract_value_after_field(full_text, "Name of Customer")
+    data["Company Code"] = extract_value_after_field(full_text, "Company Code")
+    data["Customer Group"] = extract_value_after_field(full_text, "Customer Group")
+    data["Sales Group"] = extract_value_after_field(full_text, "Sales Group")
+    data["Region"] = extract_value_after_field(full_text, "Region")
     
-    # Clean lines
-    cleaned_lines = []
-    for line in lines:
-        line = line.strip()
-        if line and line not in EXCLUDE_HEADERS:
-            cleaned_lines.append(line)
+    # Zone - careful with Sub Zone and Transportation Zone
+    zone_match = re.search(r'^Zone\s+([A-Z0-9]+)\s*$', full_text, re.MULTILINE)
+    if zone_match:
+        data["Zone"] = zone_match.group(1)
     
-    # Process line by line with next line as value
-    i = 0
-    field_map = {
-        "Type of Customer": "Type of Customer",
-        "Name of Customer": "Name of Customer",
-        "Company Code": "Company Code",
-        "Customer Group": "Customer Group",
-        "Sales Group": "Sales Group",
-        "Region": "Region",
-        "Zone": "Zone",
-        "Sub Zone": "Sub Zone",
-        "State": "State",
-        "Sales Office": "Sales Office",
-        "Mobile Number": "Mobile Number",
-        "Lattitude": "Lattitude",
-        "Longitude": "Longitude",
-        "Address 1": "Address 1",
-        "Address 2": "Address 2",
-        "Address 3": "Address 3",
-        "Address 4": "Address 4",
-        "PIN": "PIN",
-        "City": "City",
-        "District": "District",
-        "Whatsapp No.": "Whatsapp No.",
-        "Date of Birth": "Date of Birth",
-        "Date of Anniversary": "Date of Anniversary",
-        "Counter Potential - Maximum": "Counter Potential - Maximum",
-        "Counter Potential - Minimum": "Counter Potential - Minimum",
-        "Is GST Present": "Is GST Present",
-        "GSTIN": "GSTIN",
-        "Trade Name": "Trade Name",
-        "Legal Name": "Legal Name",
-        "Reg Date": "Reg Date",
-        "Type": "Type",
-        "Building No.": "Building No.",
-        "District Code": "District Code",
-        "State Code": "State Code",
-        "Street": "Street",
-        "PIN Code": "PIN Code",
-        "PAN": "PAN",
-        "PAN Holder Name": "PAN Holder Name",
-        "PAN Status": "PAN Status",
-        "IFSC Number": "IFSC Number",
-        "Account Number": "Account Number",
-        "Name of Account Holder": "Name of Account Holder",
-        "Bank Name": "Bank Name",
-        "Bank Branch": "Bank Branch",
-        "Aadhaar Number": "Aadhaar Number",
-        "Name": "Name",
-        "Gender": "Gender",
-        "DOB": "DOB",
-        "Address": "Address",
-        "Logistics Transportation Zone": "Logistics Transportation Zone",
-        "Transportation Zone Description": "Transportation Zone Description",
-        "Transportation Zone Code": "Transportation Zone Code",
-        "Postal Code": "Postal Code",
-        "Date of Appointment": "Date of Appointment",
-        "Delivering Plant": "Delivering Plant",
-        "Plant Name": "Plant Name",
-        "Plant Code": "Plant Code",
-        "Incoterns": "Incoterns",
-        "Incoterns Code": "Incoterns Code",
-        "Regional Head to be mapped": "Regional Head to be mapped",
-        "Zonal Head to be mapped": "Zonal Head to be mapped",
-        "Area Sales Manager to be mapped": "Area Sales Manager to be mapped",
-        "Sales Officer to be mapped": "Sales Officer to be mapped",
-        "Internal control code": "Internal control code",
-        "SAP CODE": "SAP CODE",
-        "Initiator Name": "Initiator Name",
-        "Initiator Email ID": "Initiator Email ID",
-        "Initiator Mobile Number": "Initiator Mobile Number",
-        "Created By Customer UserID": "Created By Customer UserID",
-        "Sales Head Name": "Sales Head Name",
-        "Sales Head Email": "Sales Head Email",
-        "Sales Head Mobile Number": "Sales Head Mobile Number",
-        "Extra2": "Extra2",
-        "PAN Result": "PAN Result",
-        "Mobile Number Result": "Mobile Number Result",
-        "Email Result": "Email Result",
-        "GST Result": "GST Result",
-        "Final Result": "Final Result",
-    }
+    data["Sub Zone"] = extract_value_after_field(full_text, "Sub Zone")
     
-    # Simple table-like extraction
-    while i < len(cleaned_lines):
-        line = cleaned_lines[i]
-        
-        # Try to split by multiple spaces (table format)
-        parts = re.split(r'\s{2,}', line)
-        
-        if len(parts) >= 2:
-            field = parts[0].strip()
-            value = ' '.join(parts[1:]).strip()
-            
-            # Map to output field name
-            if field in field_map:
-                data[field_map[field]] = value
-        
-        i += 1
+    # State - first occurrence
+    state_match = re.search(r'^State\s+([A-Z]+)\s*$', full_text, re.MULTILINE)
+    if state_match:
+        data["State"] = state_match.group(1)
     
-    # Handle special cases that weren't caught
-    # SAP Dealer code
-    if "SAP Dealer code to be mapped Search Term 2" not in data:
-        for idx, line in enumerate(cleaned_lines):
-            if "SAP Dealer code to be mapped Search Term" in line:
-                # Look for number in next few lines
-                for j in range(idx + 1, min(idx + 5, len(cleaned_lines))):
-                    if cleaned_lines[j].isdigit() and len(cleaned_lines[j]) > 5:
-                        data["SAP Dealer code to be mapped Search Term 2"] = cleaned_lines[j]
-                        break
+    data["Sales Office"] = extract_value_after_field(full_text, "Sales Office")
     
-    # Multi-line Name field
-    if "Name of the Customers (Trade Name or Legal Name)" not in data:
-        for idx, line in enumerate(cleaned_lines):
-            if "Name of the Customers (Trade Name or" in line:
-                if idx + 2 < len(cleaned_lines):
-                    if "Legal Name)" in cleaned_lines[idx + 1]:
-                        data["Name of the Customers (Trade Name or Legal Name)"] = cleaned_lines[idx + 2]
+    # SAP Dealer code - complex multi-line
+    sap_pattern = r'SAP Dealer code to be mapped Search Term\s*\n\s*2\s*\n\s*(\d+)'
+    sap_match = re.search(sap_pattern, full_text)
+    if sap_match:
+        data["SAP Dealer code to be mapped Search Term 2"] = sap_match.group(1)
     
-    # Aadhaar Address (multi-line)
-    for idx, line in enumerate(cleaned_lines):
-        if line == "Address" and idx + 1 < len(cleaned_lines):
-            # Get next few lines until we hit another field
-            addr_parts = []
-            for j in range(idx + 1, min(idx + 4, len(cleaned_lines))):
-                if cleaned_lines[j] not in field_map and not cleaned_lines[j].startswith("PIN"):
-                    addr_parts.append(cleaned_lines[j])
-                else:
-                    break
-            if addr_parts and "Address" not in data:
-                data["Address"] = " ".join(addr_parts)
+    # Search Terms
+    data["Search Term 1- Old customer code"] = extract_value_after_field(full_text, "Search Term 1- Old customer code")
+    data["Search Term 2 - District"] = extract_value_after_field(full_text, "Search Term 2 - District")
     
-    # Handle fields with additional mapping
-    special_mappings = {
-        "PAN - Aadhaar Linking Status": ["PAN - Aadhaar Linking Status", "PAN -Aadhaar Linking Status"],
-        "Is Aadhaar Linked with Mobile?": ["Is Aadhaar Linked with Mobile?", "Is Aadhaar Linked with Mobile"],
-        "Sub-Zonal Head (RSM) to be mapped": ["Sub-Zonal Head (RSM) to be mapped", "Sub-Zonal Head  (RSM) to be mapped"],
-        "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer": [
-            "Security Deposit Amount details to filled up,",
-            "Security Deposit Amount details to filled up"
-        ],
-        "Logistics team to vet the T zone selected by Sales Officer": [
-            "Logistics team to vet the T zone selected by"
-        ],
-        "Selection of Available T Zones from T Zone Master list, if found.": [
-            "Selection of Available T Zones from T Zone"
-        ],
-        "If NEW T Zone need to be created, details to be provided by Logistics team": [
-            "If NEW T Zone need to be created, details to"
-        ],
-    }
+    # Mobile Number - first occurrence
+    mobile_match = re.search(r'^Mobile Number\s+(\d+)', full_text, re.MULTILINE)
+    if mobile_match:
+        data["Mobile Number"] = mobile_match.group(1)
     
-    # Try to match special fields
-    for output_field, search_terms in special_mappings.items():
-        if output_field not in data:
-            for idx, line in enumerate(cleaned_lines):
-                for search_term in search_terms:
-                    if search_term in line:
-                        # Get value from same line or next line
-                        parts = re.split(r'\s{2,}', line)
-                        if len(parts) >= 2:
-                            data[output_field] = ' '.join(parts[1:]).strip()
-                        elif idx + 1 < len(cleaned_lines):
-                            # Check next few lines for value
-                            for j in range(idx + 1, min(idx + 3, len(cleaned_lines))):
-                                if cleaned_lines[j] and cleaned_lines[j] not in field_map:
-                                    data[output_field] = cleaned_lines[j]
-                                    break
-                        break
+    data["E-Mail ID"] = extract_value_after_field(full_text, "E-Mail ID")
+    data["Lattitude"] = extract_value_after_field(full_text, "Lattitude")
+    data["Longitude"] = extract_value_after_field(full_text, "Longitude")
+    
+    # Name of Customers - multi-line
+    name_pattern = r'Name of the Customers \(Trade Name or\s*\n\s*Legal Name\)\s+(.+?)(?=\n|$)'
+    name_match = re.search(name_pattern, full_text)
+    if name_match:
+        data["Name of the Customers (Trade Name or Legal Name)"] = name_match.group(1).strip()
+    
+    data["E-mail"] = extract_value_after_field(full_text, "E-mail")
+    data["Address 1"] = extract_value_after_field(full_text, "Address 1")
+    data["Address 2"] = extract_value_after_field(full_text, "Address 2")
+    data["Address 3"] = extract_value_after_field(full_text, "Address 3")
+    data["Address 4"] = extract_value_after_field(full_text, "Address 4")
+    
+    # PIN - first occurrence
+    pin_match = re.search(r'^PIN\s+(\d+)', full_text, re.MULTILINE)
+    if pin_match:
+        data["PIN"] = pin_match.group(1)
+    
+    # City - first occurrence
+    city_match = re.search(r'^City\s+(\w+)', full_text, re.MULTILINE)
+    if city_match:
+        data["City"] = city_match.group(1)
+    
+    # District - first occurrence
+    district_match = re.search(r'^District\s+(\w+)', full_text, re.MULTILINE)
+    if district_match:
+        data["District"] = district_match.group(1)
+    
+    data["Whatsapp No."] = extract_value_after_field(full_text, "Whatsapp No.")
+    data["Date of Birth"] = extract_value_after_field(full_text, "Date of Birth")
+    data["Date of Anniversary"] = extract_value_after_field(full_text, "Date of Anniversary")
+    data["Counter Potential - Maximum"] = extract_value_after_field(full_text, "Counter Potential - Maximum")
+    data["Counter Potential - Minimum"] = extract_value_after_field(full_text, "Counter Potential - Minimum")
+    data["Is GST Present"] = extract_value_after_field(full_text, "Is GST Present")
+    data["GSTIN"] = extract_value_after_field(full_text, "GSTIN")
+    data["Trade Name"] = extract_value_after_field(full_text, "Trade Name")
+    data["Legal Name"] = extract_value_after_field(full_text, "Legal Name")
+    data["Reg Date"] = extract_value_after_field(full_text, "Reg Date")
+    data["Type"] = extract_value_after_field(full_text, "Type")
+    data["Building No."] = extract_value_after_field(full_text, "Building No.")
+    data["District Code"] = extract_value_after_field(full_text, "District Code")
+    data["State Code"] = extract_value_after_field(full_text, "State Code")
+    data["Street"] = extract_value_after_field(full_text, "Street")
+    data["PIN Code"] = extract_value_after_field(full_text, "PIN Code")
+    data["PAN"] = extract_value_after_field(full_text, "PAN")
+    data["PAN Holder Name"] = extract_value_after_field(full_text, "PAN Holder Name")
+    data["PAN Status"] = extract_value_after_field(full_text, "PAN Status")
+    data["PAN - Aadhaar Linking Status"] = extract_value_after_field(full_text, "PAN - Aadhaar Linking Status")
+    data["IFSC Number"] = extract_value_after_field(full_text, "IFSC Number")
+    data["Account Number"] = extract_value_after_field(full_text, "Account Number")
+    data["Name of Account Holder"] = extract_value_after_field(full_text, "Name of Account Holder")
+    data["Bank Name"] = extract_value_after_field(full_text, "Bank Name")
+    data["Bank Branch"] = extract_value_after_field(full_text, "Bank Branch")
+    data["Is Aadhaar Linked with Mobile?"] = extract_value_after_field(full_text, "Is Aadhaar Linked with Mobile?")
+    data["Aadhaar Number"] = extract_value_after_field(full_text, "Aadhaar Number")
+    
+    # Name in Aadhaar section
+    name_aadhaar_pattern = r'Aadhaar Number\s+.+?\n\s*Name\s+(.+?)(?=\n|$)'
+    name_aadhaar_match = re.search(name_aadhaar_pattern, full_text, re.DOTALL)
+    if name_aadhaar_match:
+        data["Name"] = name_aadhaar_match.group(1).strip()
+    
+    data["Gender"] = extract_value_after_field(full_text, "Gender")
+    
+    # DOB in Aadhaar section
+    dob_match = re.search(r'^DOB\s+([\d/]+)', full_text, re.MULTILINE)
+    if dob_match:
+        data["DOB"] = dob_match.group(1)
+    
+    # Address in Aadhaar section - multi-line
+    address_pattern = r'DOB\s+[\d/]+\s*\n\s*Address\s+(.+?)(?=\n\s*PIN|$)'
+    address_match = re.search(address_pattern, full_text, re.DOTALL)
+    if address_match:
+        data["Address"] = address_match.group(1).strip()
+    
+    data["Logistics Transportation Zone"] = extract_value_after_field(full_text, "Logistics Transportation Zone")
+    data["Transportation Zone Description"] = extract_value_after_field(full_text, "Transportation Zone Description")
+    data["Transportation Zone Code"] = extract_value_after_field(full_text, "Transportation Zone Code")
+    data["Postal Code"] = extract_value_after_field(full_text, "Postal Code")
+    
+    # Multi-line logistics fields
+    logistics_pattern = r'Logistics team to vet the T zone selected by\s*\n\s*Sales Officer\s*\n?\s*(\w+)'
+    logistics_match = re.search(logistics_pattern, full_text)
+    if logistics_match:
+        data["Logistics team to vet the T zone selected by Sales Officer"] = logistics_match.group(1)
+    
+    tzone_pattern = r'Selection of Available T Zones from T Zone\s*\n\s*Master list, if found\.\s*\n?\s*(.+?)(?=\n|$)'
+    tzone_match = re.search(tzone_pattern, full_text)
+    if tzone_match:
+        data["Selection of Available T Zones from T Zone Master list, if found."] = tzone_match.group(1).strip()
+    
+    new_tzone_pattern = r'If NEW T Zone need to be created, details to\s*\n\s*be provided by Logistics team\s*\n?\s*(.+?)(?=\n|$)'
+    new_tzone_match = re.search(new_tzone_pattern, full_text)
+    if new_tzone_match:
+        data["If NEW T Zone need to be created, details to be provided by Logistics team"] = new_tzone_match.group(1).strip()
+    
+    data["Date of Appointment"] = extract_value_after_field(full_text, "Date of Appointment")
+    data["Delivering Plant"] = extract_value_after_field(full_text, "Delivering Plant")
+    data["Plant Name"] = extract_value_after_field(full_text, "Plant Name")
+    data["Plant Code"] = extract_value_after_field(full_text, "Plant Code")
+    
+    # Incoterns - first occurrence
+    inco_match = re.search(r'^Incoterns\s+(.+?)(?=\n|$)', full_text, re.MULTILINE)
+    if inco_match:
+        data["Incoterns"] = inco_match.group(1).strip()
+    
+    data["Incoterns Code"] = extract_value_after_field(full_text, "Incoterns Code")
+    
+    # Security Deposit - multi-line
+    security_pattern = r'Security Deposit Amount details to filled up,\s*\n\s*as per checque received by Customer / Dealer\s*\n?\s*(\d+)'
+    security_match = re.search(security_pattern, full_text)
+    if security_match:
+        data["Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"] = security_match.group(1)
+    
+    data["Credit Limit (In Rs.)"] = extract_value_after_field(full_text, "Credit Limit (In Rs.)")
+    data["Regional Head to be mapped"] = extract_value_after_field(full_text, "Regional Head to be mapped")
+    data["Zonal Head to be mapped"] = extract_value_after_field(full_text, "Zonal Head to be mapped")
+    data["Sub-Zonal Head (RSM) to be mapped"] = extract_value_after_field(full_text, "Sub-Zonal Head (RSM) to be mapped")
+    data["Area Sales Manager to be mapped"] = extract_value_after_field(full_text, "Area Sales Manager to be mapped")
+    data["Sales Officer to be mapped"] = extract_value_after_field(full_text, "Sales Officer to be mapped")
+    data["Sales Promoter to be mapped"] = extract_value_after_field(full_text, "Sales Promoter to be mapped")
+    data["Sales Promoter Number"] = extract_value_after_field(full_text, "Sales Promoter Number")
+    data["Internal control code"] = extract_value_after_field(full_text, "Internal control code")
+    data["SAP CODE"] = extract_value_after_field(full_text, "SAP CODE")
+    data["Initiator Name"] = extract_value_after_field(full_text, "Initiator Name")
+    data["Initiator Email ID"] = extract_value_after_field(full_text, "Initiator Email ID")
+    data["Initiator Mobile Number"] = extract_value_after_field(full_text, "Initiator Mobile Number")
+    data["Created By Customer UserID"] = extract_value_after_field(full_text, "Created By Customer UserID")
+    data["Sales Head Name"] = extract_value_after_field(full_text, "Sales Head Name")
+    data["Sales Head Email"] = extract_value_after_field(full_text, "Sales Head Email")
+    data["Sales Head Mobile Number"] = extract_value_after_field(full_text, "Sales Head Mobile Number")
+    data["Extra2"] = extract_value_after_field(full_text, "Extra2")
+    data["PAN Result"] = extract_value_after_field(full_text, "PAN Result")
+    data["Mobile Number Result"] = extract_value_after_field(full_text, "Mobile Number Result")
+    data["Email Result"] = extract_value_after_field(full_text, "Email Result")
+    data["GST Result"] = extract_value_after_field(full_text, "GST Result")
+    data["Final Result"] = extract_value_after_field(full_text, "Final Result")
     
     return data
 
