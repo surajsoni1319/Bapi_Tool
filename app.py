@@ -1,201 +1,162 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import pandas as pd
 import re
+import pandas as pd
 from io import BytesIO
 
 # --------------------------------------------------
-# Page config
+# PAGE CONFIG
 # --------------------------------------------------
 st.set_page_config(
-    page_title="PDF Customer Data Extractor",
+    page_title="ZSUB PDF Data Extractor",
     page_icon="📄",
     layout="wide"
 )
 
-# --------------------------------------------------
-# Title
-# --------------------------------------------------
-st.title("📄 PDF Customer Data Extractor")
+st.title("📄 ZSUB Customer PDF Data Extractor")
+st.caption("Template-Driven | No OCR | High Accuracy")
+
 st.markdown("---")
 
 # --------------------------------------------------
-# Expected Fields (UNCHANGED)
+# FIELD → REGEX MAPPING
 # --------------------------------------------------
-EXPECTED_FIELDS = [
-    "Type of Customer","Name of Customer","Company Code","Customer Group",
-    "Sales Group","Region","Zone","Sub Zone","State","Sales Office",
-    "SAP Dealer code to be mapped Search Term 2","Search Term 1- Old customer code",
-    "Search Term 2 - District","Mobile Number","E-Mail ID","Lattitude","Longitude",
-    "Name of the Customers (Trade Name or Legal Name)","Mobile Number","E-mail",
-    "Address 1","Address 2","Address 3","Address 4","PIN","City","District","State",
-    "Whatsapp No.","Date of Birth","Date of Anniversary",
-    "Counter Potential - Maximum","Counter Potential - Minimum",
-    "Is GST Present","GSTIN","Trade Name","Legal Name","Reg Date","City","Type",
-    "Building No.","District Code","State Code","Street","PIN Code",
-    "PAN","PAN Holder Name","PAN Status","PAN - Aadhaar Linking Status",
-    "IFSC Number","Account Number","Name of Account Holder","Bank Name","Bank Branch",
-    "Is Aadhaar Linked with Mobile?","Aadhaar Number","Name","Gender","DOB","Address",
-    "PIN","City","State","Logistics Transportation Zone",
-    "Transportation Zone Description","Transportation Zone Code","Postal Code",
-    "Logistics team to vet the T zone selected by Sales Officer",
-    "Selection of Available T Zones from T Zone Master list, if found.",
-    "If NEW T Zone need to be created, details to be provided by Logistics team",
-    "Date of Appointment","Delivering Plant","Plant Name","Plant Code",
-    "Incoterns","Incoterns","Incoterns Code",
-    "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer",
-    "Credit Limit (In Rs.)","Regional Head to be mapped","Zonal Head to be mapped",
-    "Sub-Zonal Head (RSM) to be mapped","Area Sales Manager to be mapped",
-    "Sales Officer to be mapped","Sales Promoter to be mapped",
-    "Sales Promoter Number","Internal control code","SAP CODE","Initiator Name",
-    "Initiator Email ID","Initiator Mobile Number","Created By Customer UserID",
-    "Sales Head Name","Sales Head Email","Sales Head Mobile Number","Extra2",
-    "PAN Result","Mobile Number Result","Email Result","GST Result","Final Result"
-]
+
+FIELD_PATTERNS = {
+    "Type of Customer": r"Type of Customer\s+(.*)",
+    "Name of Customer": r"Name of Customer\s+(.*)",
+    "Company Code": r"Company Code\s+(.*)",
+    "Customer Group": r"Customer Group\s+(.*)",
+    "Sales Group": r"Sales Group\s+(.*)",
+    "Region": r"Region\s+(.*)",
+    "Zone": r"Zone\s+(.*)",
+    "Sub Zone": r"Sub Zone\s+(.*)",
+    "State": r"State\s+(.*)",
+    "Sales Office": r"Sales Office\s+(.*)",
+
+    "SAP Dealer Code": r"SAP Dealer code.*?\s+(\d+)",
+    "Old Customer Code": r"Search Term 1- Old customer code\s*(.*)",
+    "Search Term District": r"Search Term 2 - District\s*(.*)",
+
+    "Mobile Number": r"Mobile Number\s+(\d{10})",
+    "Email": r"E-Mail ID\s*([\w\.-]+@[\w\.-]+)?",
+
+    "Latitude": r"Lattitude\s+([\d\.]+)",
+    "Longitude": r"Longitude\s+([\d\.]+)",
+
+    "Trade / Legal Name": r"Name of the Customers.*?\s+(.*)",
+
+    "Address 1": r"Address 1\s+(.*)",
+    "Address 2": r"Address 2\s+(.*)",
+    "Address 3": r"Address 3\s+(.*)",
+    "Address 4": r"Address 4\s+(.*)",
+
+    "PIN": r"PIN\s+(\d{6})",
+    "City": r"City\s+(.*)",
+    "District": r"District\s+(.*)",
+    "Whatsapp No": r"Whatsapp No\.\s*(\d{10})?",
+
+    "Date of Birth": r"Date of Birth\s+([\d\-\/]+)",
+    "Date of Anniversary": r"Date of Anniversary\s+([\d\-\/]+)?",
+
+    "Is GST Present": r"Is GST Present\s+(Yes|No)",
+    "GSTIN": r"GSTIN\s+([A-Z0-9]{15})?",
+
+    "PAN": r"PAN\s+([A-Z0-9]{10})",
+    "PAN Holder Name": r"PAN Holder Name\s+(.*)",
+    "PAN Status": r"PAN Status\s+(.*)",
+
+    "IFSC Number": r"IFSC Number\s+([A-Z0-9]+)",
+    "Account Number": r"Account Number\s+(\d+)",
+    "Account Holder": r"Name of Account Holder\s+(.*)",
+    "Bank Name": r"Bank Name\s+(.*)",
+    "Bank Branch": r"Bank Branch\s+(.*)",
+
+    "Aadhaar Linked with Mobile": r"Is Aadhaar Linked with Mobile\?\s+(Yes|No)",
+    "Aadhaar Number": r"Aadhaar Number\s+([X\d\s]+)",
+
+    "Gender": r"Gender\s+(.*)",
+
+    "Logistics Transportation Zone": r"Logistics Transportation Zone\s+(.*)",
+    "Transportation Zone Code": r"Transportation Zone Code\s+(\d+)",
+
+    "Plant Name": r"Plant Name\s+(.*)",
+    "Plant Code": r"Plant Code\s+(.*)",
+
+    "Incoterms": r"Incoterns\s+(.*)",
+    "Incoterms Code": r"Incoterns Code\s+(.*)",
+
+    "Security Deposit": r"Dealer\s+(\d+)",
+    "Credit Limit": r"Credit Limit \(In Rs\.?\)\s*(\d+)?",
+
+    "Initiator Name": r"Initiator Name\s+(.*)",
+    "Initiator Email": r"Initiator Email ID\s+([\w\.-]+@[\w\.-]+)",
+    "Initiator Mobile": r"Initiator Mobile Number\s+(\d{10})",
+
+    "Final Result": r"Final Result\s+(True|False)"
+}
 
 # --------------------------------------------------
-# Helpers
+# FUNCTIONS
 # --------------------------------------------------
-def normalize_text(txt):
-    return re.sub(r"\s+", " ", txt.strip())
 
-
-def extract_layout_pairs(pdf_bytes):
-    """
-    Layout-based extraction using X/Y coordinates
-    """
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    pairs = []
-
+def extract_text_from_pdf(file):
+    doc = fitz.open(stream=file.read(), filetype="pdf")
+    text = ""
     for page in doc:
-        blocks = page.get_text("dict")["blocks"]
+        text += page.get_text()
+    return re.sub(r"\s+", " ", text)
 
-        for block in blocks:
-            if "lines" not in block:
-                continue
 
-            for line in block["lines"]:
-                spans = []
-                for span in line["spans"]:
-                    text = normalize_text(span["text"])
-                    if text:
-                        spans.append({
-                            "text": text,
-                            "x": span["bbox"][0]
-                        })
+def extract_fields(text):
+    record = {}
+    for field, pattern in FIELD_PATTERNS.items():
+        match = re.search(pattern, text, re.IGNORECASE)
+        record[field] = match.group(1).strip() if match else ""
+    return record
 
-                if len(spans) >= 2:
-                    spans = sorted(spans, key=lambda s: s["x"])
-                    field = spans[0]["text"]
-                    value = " ".join(s["text"] for s in spans[1:])
-                    pairs.append((field, value))
-                elif len(spans) == 1:
-                    pairs.append((spans[0]["text"], ""))
 
-    doc.close()
-    return pairs
-
+def convert_df_to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    return output.getvalue()
 
 # --------------------------------------------------
-# MAIN EXTRACTION FUNCTION (UPDATED)
+# UI
 # --------------------------------------------------
-def extract_data_from_pdf(pdf_file):
-    pdf_bytes = pdf_file.read()
 
-    raw_pairs = extract_layout_pairs(pdf_bytes)
+uploaded_files = st.file_uploader(
+    "📤 Upload ZSUB PDFs",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
-    raw_df = pd.DataFrame(raw_pairs, columns=["Field", "Value"])
-    raw_df["Field"] = raw_df["Field"].str.strip()
-    raw_df["Value"] = raw_df["Value"].str.strip()
-    raw_df = raw_df[raw_df["Field"] != ""]
+if uploaded_files:
+    st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
 
-    output_data = []
-    field_counts = {}
+    if st.button("🚀 Extract Data", use_container_width=True):
+        rows = []
 
-    for expected_field in EXPECTED_FIELDS:
-        field_counts[expected_field] = field_counts.get(expected_field, 0) + 1
-        occurrence = field_counts[expected_field]
+        with st.spinner("Extracting data from PDFs..."):
+            for file in uploaded_files:
+                text = extract_text_from_pdf(file)
+                data = extract_fields(text)
+                data["Source File"] = file.name
+                rows.append(data)
 
-        value = ""
+        df = pd.DataFrame(rows)
 
-        matches = raw_df[
-            raw_df["Field"].str.fullmatch(
-                re.escape(expected_field), case=False, na=False
-            )
-        ]
+        st.subheader("📊 Extracted Data Preview")
+        st.dataframe(df, use_container_width=True)
 
-        if not matches.empty:
-            if occurrence <= len(matches):
-                value = matches.iloc[occurrence - 1]["Value"]
-            else:
-                value = matches.iloc[0]["Value"]
+        excel_data = convert_df_to_excel(df)
 
-        output_data.append({"Field": expected_field, "Value": value})
-
-    final_df = pd.DataFrame(output_data)
-    return final_df, raw_df
-
-
-# --------------------------------------------------
-# Sidebar
-# --------------------------------------------------
-with st.sidebar:
-    st.header("⚙️ Options")
-    show_raw = st.checkbox("Show raw extraction", False)
-    hide_empty = st.checkbox("Hide empty fields", False)
-    show_stats = st.checkbox("Show statistics", True)
-    st.markdown("---")
-    st.info(f"Total Expected Fields: {len(EXPECTED_FIELDS)}")
-
-# --------------------------------------------------
-# File uploader
-# --------------------------------------------------
-uploaded_file = st.file_uploader("Upload Customer Creation PDF", type=["pdf"])
-
-if uploaded_file:
-    st.success(f"Uploaded: {uploaded_file.name}")
-
-    if st.button("🚀 Extract Data", type="primary", use_container_width=True):
-        with st.spinner("Extracting using layout detection..."):
-            final_df, raw_df = extract_data_from_pdf(uploaded_file)
-
-        if show_raw:
-            st.subheader("🔍 Raw Layout Extraction (Debug)")
-            st.dataframe(raw_df, use_container_width=True, height=350)
-
-        display_df = final_df.copy()
-        if hide_empty:
-            display_df = display_df[display_df["Value"] != ""]
-
-        if show_stats:
-            filled = (final_df["Value"] != "").sum()
-            total = len(final_df)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Fields", total)
-            c2.metric("Fields Filled", filled)
-            c3.metric("Completion", f"{(filled/total)*100:.1f}%")
-
-        st.subheader("📋 Extracted Data (Row-wise)")
-        st.dataframe(display_df, use_container_width=True, height=500)
-
-        # Downloads
-        csv_data = final_df.to_csv(index=False).encode("utf-8")
-        excel_output = BytesIO()
-        with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
-            final_df.to_excel(writer, index=False, sheet_name="Customer Data")
-
-        st.markdown("### 📥 Download")
-        col1, col2 = st.columns(2)
-        col1.download_button("Download CSV", csv_data, "customer_data.csv", "text/csv")
-        col2.download_button(
-            "Download Excel",
-            excel_output.getvalue(),
-            "customer_data.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        st.download_button(
+            label="⬇️ Download Excel",
+            data=excel_data,
+            file_name="zsub_extracted_data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
 else:
-    st.info("👆 Upload a PDF to start extraction")
-
-st.markdown("---")
-st.markdown("Built with Streamlit • PyMuPDF • Layout-based Extraction")
+    st.info("Upload one or more ZSUB PDF files to begin.")
