@@ -2,24 +2,25 @@ import streamlit as st
 import fitz
 import pandas as pd
 from io import BytesIO
+import re
 
-# -----------------------------------------
+# -------------------------------------------------
 # PAGE CONFIG
-# -----------------------------------------
+# -------------------------------------------------
 st.set_page_config(
-    page_title="ZSUB PDF Data Extractor",
+    page_title="ZSUB PDF Extractor (Stable)",
     page_icon="📄",
     layout="wide"
 )
 
-st.title("📄 ZSUB Customer PDF Extractor (Fixed)")
-st.caption("Template-driven | Line-based | No OCR")
+st.title("📄 ZSUB Customer PDF Data Extractor")
+st.caption("Template-Driven | Anchor-Based | No OCR")
 
 st.markdown("---")
 
-# -----------------------------------------
-# FIELD LABELS (EXACT PDF LABELS)
-# -----------------------------------------
+# -------------------------------------------------
+# FIELD LABELS (ORDER MATTERS)
+# -------------------------------------------------
 FIELDS = [
     "Type of Customer",
     "Name of Customer",
@@ -81,28 +82,34 @@ FIELDS = [
     "Final Result"
 ]
 
-# -----------------------------------------
+# -------------------------------------------------
 # FUNCTIONS
-# -----------------------------------------
-
-def extract_text_lines(pdf_file):
+# -------------------------------------------------
+def extract_text(pdf_file):
     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
     text = ""
     for page in doc:
         text += page.get_text()
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    return lines
+    return re.sub(r"\s+", " ", text)
 
 
-def extract_fields_from_lines(lines):
-    data = {field: "" for field in FIELDS}
+def extract_fields(text):
+    data = {}
+    for i, field in enumerate(FIELDS):
+        start = text.find(field)
+        if start == -1:
+            data[field] = ""
+            continue
 
-    for i, line in enumerate(lines):
-        for field in FIELDS:
-            if line == field:
-                # Take next non-empty line as value
-                if i + 1 < len(lines):
-                    data[field] = lines[i + 1]
+        start += len(field)
+
+        if i + 1 < len(FIELDS):
+            end = text.find(FIELDS[i + 1], start)
+            value = text[start:end] if end != -1 else text[start:]
+        else:
+            value = text[start:]
+
+        data[field] = value.strip(" :-\n")
     return data
 
 
@@ -112,9 +119,9 @@ def to_excel(df):
         df.to_excel(writer, index=False)
     return output.getvalue()
 
-# -----------------------------------------
+# -------------------------------------------------
 # UI
-# -----------------------------------------
+# -------------------------------------------------
 uploaded_files = st.file_uploader(
     "📤 Upload ZSUB PDFs",
     type=["pdf"],
@@ -127,10 +134,10 @@ if uploaded_files:
     if st.button("🚀 Extract Data", use_container_width=True):
         rows = []
 
-        with st.spinner("Extracting data..."):
+        with st.spinner("Extracting data reliably..."):
             for file in uploaded_files:
-                lines = extract_text_lines(file)
-                record = extract_fields_from_lines(lines)
+                text = extract_text(file)
+                record = extract_fields(text)
                 record["Source File"] = file.name
                 rows.append(record)
 
