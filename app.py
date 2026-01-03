@@ -65,132 +65,188 @@ def extract_data_from_pdf(pdf_file):
     
     pdf_document.close()
     
-    # Parse the text using regex patterns
+    # Use pdfplumber-style table extraction
     data = {}
     
-    # Simple extraction patterns - field name followed by value on same line
-    patterns = {
-        "Type of Customer": r"Type of Customer\s+(.+?)(?=\n|$)",
-        "Name of Customer": r"Name of Customer\s+(.+?)(?=\n|$)",
-        "Company Code": r"Company Code\s+(.+?)(?=\n|$)",
-        "Customer Group": r"Customer Group\s+(.+?)(?=\n|$)",
-        "Sales Group": r"Sales Group\s+(.+?)(?=\n|$)",
-        "Region": r"Region\s+([A-Z0-9]+)(?=\n|$)",
-        "Zone": r"^Zone\s+([A-Z0-9]+)(?=\n|$)",
-        "Sub Zone": r"Sub Zone\s+(.+?)(?=\n|$)",
-        "Sales Office": r"Sales Office\s+(.+?)(?=\n|$)",
-        "Mobile Number": r"^Mobile Number\s+(\d+)",
-        "Lattitude": r"Lattitude\s+([\d.]+)",
-        "Longitude": r"Longitude\s+([\d.]+)",
-        "Address 1": r"Address 1\s+(.+?)(?=\n|$)",
-        "PIN": r"^PIN\s+(\d+)",
-        "City": r"^City\s+(\w+)",
-        "District": r"^District\s+(\w+)",
-        "Whatsapp No.": r"Whatsapp No\.\s+(\d+)",
-        "Date of Birth": r"Date of Birth\s+([\d\-/]+)",
-        "Date of Anniversary": r"Date of Anniversary\s+([\d\-/]+)",
-        "Counter Potential - Maximum": r"Counter Potential - Maximum\s+(\d+)",
-        "Counter Potential - Minimum": r"Counter Potential - Minimum\s+(\d+)",
-        "Is GST Present": r"Is GST Present\s+(\w+)",
-        "PAN": r"^PAN\s+([A-Z0-9]+)(?=\n|$)",
-        "PAN Holder Name": r"PAN Holder Name\s+(.+?)(?=\n|$)",
-        "PAN Status": r"PAN Status\s+(\w+)",
-        "PAN - Aadhaar Linking Status": r"PAN - Aadhaar Linking Status\s+(\w+)",
-        "IFSC Number": r"IFSC Number\s+([A-Z0-9]+)",
-        "Account Number": r"Account Number\s+(\d+)",
-        "Name of Account Holder": r"Name of Account Holder\s+(.+?)(?=\n|$)",
-        "Bank Name": r"Bank Name\s+(.+?)(?=\n|$)",
-        "Bank Branch": r"Bank Branch\s+(.+?)(?=\n|$)",
-        "Is Aadhaar Linked with Mobile?": r"Is Aadhaar Linked with Mobile\?\s+(\w+)",
-        "Aadhaar Number": r"Aadhaar Number\s+(.+?)(?=\n|$)",
-        "Gender": r"Gender\s+(\w+)",
-        "DOB": r"^DOB\s+([\d/]+)",
-        "Logistics Transportation Zone": r"Logistics Transportation Zone\s+(.+?)(?=\n|$)",
-        "Transportation Zone Description": r"Transportation Zone Description\s+(.+?)(?=\n|$)",
-        "Transportation Zone Code": r"Transportation Zone Code\s+(\d+)",
-        "Date of Appointment": r"Date of Appointment\s+([\d\-]+)",
-        "Delivering Plant": r"Delivering Plant\s+(.+?)(?=\n|$)",
-        "Plant Name": r"Plant Name\s+(.+?)(?=\n|$)",
-        "Plant Code": r"Plant Code\s+(\w+)",
-        "Incoterns": r"^Incoterns\s+(.+?)(?=\n|$)",
-        "Regional Head to be mapped": r"Regional Head to be mapped\s+(\w+)",
-        "Zonal Head to be mapped": r"Zonal Head to be mapped\s+(\w+)",
-        "Sub-Zonal Head (RSM) to be mapped": r"Sub-Zonal Head \(RSM\) to be mapped\s+(\w+)",
-        "Area Sales Manager to be mapped": r"Area Sales Manager to be mapped\s+(\w+)",
-        "Sales Officer to be mapped": r"Sales Officer to be mapped\s+(\w+)",
-        "Internal control code": r"Internal control code\s+(\w+)",
-        "Initiator Name": r"Initiator Name\s+(.+?)(?=\n|$)",
-        "Initiator Email ID": r"Initiator Email ID\s+(.+?)(?=\n|$)",
-        "Initiator Mobile Number": r"Initiator Mobile Number\s+(\d+)",
-        "Created By Customer UserID": r"Created By Customer UserID\s+(\w+)",
-        "Sales Head Name": r"Sales Head Name\s+(.+?)(?=\n|$)",
-        "Sales Head Email": r"Sales Head Email\s+(.+?)(?=\n|$)",
-        "Sales Head Mobile Number": r"Sales Head Mobile Number\s+(\d+)",
-        "Final Result": r"Final Result\s+(\w+)",
+    # Split into lines and process
+    lines = full_text.split('\n')
+    
+    # Clean lines
+    cleaned_lines = []
+    for line in lines:
+        line = line.strip()
+        if line and line not in EXCLUDE_HEADERS:
+            cleaned_lines.append(line)
+    
+    # Process line by line with next line as value
+    i = 0
+    field_map = {
+        "Type of Customer": "Type of Customer",
+        "Name of Customer": "Name of Customer",
+        "Company Code": "Company Code",
+        "Customer Group": "Customer Group",
+        "Sales Group": "Sales Group",
+        "Region": "Region",
+        "Zone": "Zone",
+        "Sub Zone": "Sub Zone",
+        "State": "State",
+        "Sales Office": "Sales Office",
+        "Mobile Number": "Mobile Number",
+        "Lattitude": "Lattitude",
+        "Longitude": "Longitude",
+        "Address 1": "Address 1",
+        "Address 2": "Address 2",
+        "Address 3": "Address 3",
+        "Address 4": "Address 4",
+        "PIN": "PIN",
+        "City": "City",
+        "District": "District",
+        "Whatsapp No.": "Whatsapp No.",
+        "Date of Birth": "Date of Birth",
+        "Date of Anniversary": "Date of Anniversary",
+        "Counter Potential - Maximum": "Counter Potential - Maximum",
+        "Counter Potential - Minimum": "Counter Potential - Minimum",
+        "Is GST Present": "Is GST Present",
+        "GSTIN": "GSTIN",
+        "Trade Name": "Trade Name",
+        "Legal Name": "Legal Name",
+        "Reg Date": "Reg Date",
+        "Type": "Type",
+        "Building No.": "Building No.",
+        "District Code": "District Code",
+        "State Code": "State Code",
+        "Street": "Street",
+        "PIN Code": "PIN Code",
+        "PAN": "PAN",
+        "PAN Holder Name": "PAN Holder Name",
+        "PAN Status": "PAN Status",
+        "IFSC Number": "IFSC Number",
+        "Account Number": "Account Number",
+        "Name of Account Holder": "Name of Account Holder",
+        "Bank Name": "Bank Name",
+        "Bank Branch": "Bank Branch",
+        "Aadhaar Number": "Aadhaar Number",
+        "Name": "Name",
+        "Gender": "Gender",
+        "DOB": "DOB",
+        "Address": "Address",
+        "Logistics Transportation Zone": "Logistics Transportation Zone",
+        "Transportation Zone Description": "Transportation Zone Description",
+        "Transportation Zone Code": "Transportation Zone Code",
+        "Postal Code": "Postal Code",
+        "Date of Appointment": "Date of Appointment",
+        "Delivering Plant": "Delivering Plant",
+        "Plant Name": "Plant Name",
+        "Plant Code": "Plant Code",
+        "Incoterns": "Incoterns",
+        "Incoterns Code": "Incoterns Code",
+        "Regional Head to be mapped": "Regional Head to be mapped",
+        "Zonal Head to be mapped": "Zonal Head to be mapped",
+        "Area Sales Manager to be mapped": "Area Sales Manager to be mapped",
+        "Sales Officer to be mapped": "Sales Officer to be mapped",
+        "Internal control code": "Internal control code",
+        "SAP CODE": "SAP CODE",
+        "Initiator Name": "Initiator Name",
+        "Initiator Email ID": "Initiator Email ID",
+        "Initiator Mobile Number": "Initiator Mobile Number",
+        "Created By Customer UserID": "Created By Customer UserID",
+        "Sales Head Name": "Sales Head Name",
+        "Sales Head Email": "Sales Head Email",
+        "Sales Head Mobile Number": "Sales Head Mobile Number",
+        "Extra2": "Extra2",
+        "PAN Result": "PAN Result",
+        "Mobile Number Result": "Mobile Number Result",
+        "Email Result": "Email Result",
+        "GST Result": "GST Result",
+        "Final Result": "Final Result",
     }
     
-    # Extract using patterns
-    for field, pattern in patterns.items():
-        match = re.search(pattern, full_text, re.MULTILINE)
-        if match:
-            data[field] = match.group(1).strip()
+    # Simple table-like extraction
+    while i < len(cleaned_lines):
+        line = cleaned_lines[i]
+        
+        # Try to split by multiple spaces (table format)
+        parts = re.split(r'\s{2,}', line)
+        
+        if len(parts) >= 2:
+            field = parts[0].strip()
+            value = ' '.join(parts[1:]).strip()
+            
+            # Map to output field name
+            if field in field_map:
+                data[field_map[field]] = value
+        
+        i += 1
     
-    # Special handling for multi-line fields
+    # Handle special cases that weren't caught
+    # SAP Dealer code
+    if "SAP Dealer code to be mapped Search Term 2" not in data:
+        for idx, line in enumerate(cleaned_lines):
+            if "SAP Dealer code to be mapped Search Term" in line:
+                # Look for number in next few lines
+                for j in range(idx + 1, min(idx + 5, len(cleaned_lines))):
+                    if cleaned_lines[j].isdigit() and len(cleaned_lines[j]) > 5:
+                        data["SAP Dealer code to be mapped Search Term 2"] = cleaned_lines[j]
+                        break
     
-    # State - first occurrence
-    state_match = re.search(r"^State\s+([A-Z]+)", full_text, re.MULTILINE)
-    if state_match:
-        data["State"] = state_match.group(1)
+    # Multi-line Name field
+    if "Name of the Customers (Trade Name or Legal Name)" not in data:
+        for idx, line in enumerate(cleaned_lines):
+            if "Name of the Customers (Trade Name or" in line:
+                if idx + 2 < len(cleaned_lines):
+                    if "Legal Name)" in cleaned_lines[idx + 1]:
+                        data["Name of the Customers (Trade Name or Legal Name)"] = cleaned_lines[idx + 2]
     
-    # SAP Dealer code (has number separator)
-    sap_match = re.search(r"SAP Dealer code to be mapped Search Term\s*\n\s*2\s*\n\s*(\d+)", full_text)
-    if sap_match:
-        data["SAP Dealer code to be mapped Search Term 2"] = sap_match.group(1)
+    # Aadhaar Address (multi-line)
+    for idx, line in enumerate(cleaned_lines):
+        if line == "Address" and idx + 1 < len(cleaned_lines):
+            # Get next few lines until we hit another field
+            addr_parts = []
+            for j in range(idx + 1, min(idx + 4, len(cleaned_lines))):
+                if cleaned_lines[j] not in field_map and not cleaned_lines[j].startswith("PIN"):
+                    addr_parts.append(cleaned_lines[j])
+                else:
+                    break
+            if addr_parts and "Address" not in data:
+                data["Address"] = " ".join(addr_parts)
     
-    # Name of Customers (multi-line)
-    name_match = re.search(r"Name of the Customers \(Trade Name or\s*\n\s*Legal Name\)\s*\n?\s*(.+?)(?=\n|$)", full_text)
-    if name_match:
-        data["Name of the Customers (Trade Name or Legal Name)"] = name_match.group(1).strip()
+    # Handle fields with additional mapping
+    special_mappings = {
+        "PAN - Aadhaar Linking Status": ["PAN - Aadhaar Linking Status", "PAN -Aadhaar Linking Status"],
+        "Is Aadhaar Linked with Mobile?": ["Is Aadhaar Linked with Mobile?", "Is Aadhaar Linked with Mobile"],
+        "Sub-Zonal Head (RSM) to be mapped": ["Sub-Zonal Head (RSM) to be mapped", "Sub-Zonal Head  (RSM) to be mapped"],
+        "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer": [
+            "Security Deposit Amount details to filled up,",
+            "Security Deposit Amount details to filled up"
+        ],
+        "Logistics team to vet the T zone selected by Sales Officer": [
+            "Logistics team to vet the T zone selected by"
+        ],
+        "Selection of Available T Zones from T Zone Master list, if found.": [
+            "Selection of Available T Zones from T Zone"
+        ],
+        "If NEW T Zone need to be created, details to be provided by Logistics team": [
+            "If NEW T Zone need to be created, details to"
+        ],
+    }
     
-    # Name (in Aadhaar section)
-    name_aadhaar = re.search(r"Aadhaar Number.+?\n\s*Name\s+(.+?)(?=\n|$)", full_text, re.DOTALL)
-    if name_aadhaar:
-        data["Name"] = name_aadhaar.group(1).strip()
-    
-    # Address (multi-line in Aadhaar section)
-    address_match = re.search(r"DOB\s+[\d/]+\s*\n\s*Address\s+(.+?)(?=\n\s*PIN|$)", full_text, re.DOTALL)
-    if address_match:
-        data["Address"] = address_match.group(1).strip()
-    
-    # Logistics team field
-    logistics_match = re.search(r"Logistics team to vet the T zone selected by\s*\n\s*Sales Officer\s*\n?\s*(\w+)", full_text)
-    if logistics_match:
-        data["Logistics team to vet the T zone selected by Sales Officer"] = logistics_match.group(1)
-    
-    # Selection of T Zones
-    tzone_match = re.search(r"Selection of Available T Zones from T Zone\s*\n\s*Master list, if found\.\s*\n?\s*(.+?)(?=\n|$)", full_text)
-    if tzone_match:
-        data["Selection of Available T Zones from T Zone Master list, if found."] = tzone_match.group(1).strip()
-    
-    # Incoterns Code
-    inco_code = re.search(r"Incoterns Code\s+([A-Z]+)", full_text)
-    if inco_code:
-        data["Incoterns Code"] = inco_code.group(1)
-    
-    # Security Deposit
-    security_match = re.search(r"Security Deposit Amount details to filled up,\s*\n\s*as per checque received by Customer / Dealer\s*\n?\s*(\d+)", full_text)
-    if security_match:
-        data["Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"] = security_match.group(1)
-    
-    # PAN Result
-    pan_result = re.search(r"PAN Result\s+([A-Z])", full_text)
-    if pan_result:
-        data["PAN Result"] = pan_result.group(1)
-    
-    # Mobile Number Result
-    mobile_result = re.search(r"Mobile Number Result\s+([A-Z])", full_text)
-    if mobile_result:
-        data["Mobile Number Result"] = mobile_result.group(1)
+    # Try to match special fields
+    for output_field, search_terms in special_mappings.items():
+        if output_field not in data:
+            for idx, line in enumerate(cleaned_lines):
+                for search_term in search_terms:
+                    if search_term in line:
+                        # Get value from same line or next line
+                        parts = re.split(r'\s{2,}', line)
+                        if len(parts) >= 2:
+                            data[output_field] = ' '.join(parts[1:]).strip()
+                        elif idx + 1 < len(cleaned_lines):
+                            # Check next few lines for value
+                            for j in range(idx + 1, min(idx + 3, len(cleaned_lines))):
+                                if cleaned_lines[j] and cleaned_lines[j] not in field_map:
+                                    data[output_field] = cleaned_lines[j]
+                                    break
+                        break
     
     return data
 
