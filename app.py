@@ -8,8 +8,8 @@ from io import BytesIO
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="ZSUB PDF Extractor", layout="wide")
-st.title("📄 ZSUB PDF Data Extractor (Final Corrected)")
-st.caption("Section-aware | Line-break safe | SAP-ready")
+st.title("📄 ZSUB PDF Data Extractor (Final Stable)")
+st.caption("Section-aware • No OCR • SAP-ready")
 
 # -------------------------------------------------
 # GLOBAL CONTROLS
@@ -28,6 +28,7 @@ EMPTY_ALLOWED_FIELDS = {
     "If NEW T Zone need to be created, details to be provided by Logistics team"
 }
 
+# ⚠️ ONLY ID / NUMBER FIELDS HERE
 SINGLE_TOKEN_FIELDS = {
     "SAP Dealer code to be mapped Search Term 2",
     "Regional Head to be mapped",
@@ -40,7 +41,9 @@ SINGLE_TOKEN_FIELDS = {
     "Plant Code",
     "IFSC Number",
     "Account Number",
-    "Sales Head Mobile Number"
+    "Initiator Mobile Number",
+    "Sales Head Mobile Number",
+    "Mobile Number"
 }
 
 # -------------------------------------------------
@@ -187,25 +190,25 @@ SECTIONS = {
 # HELPERS
 # -------------------------------------------------
 
-def normalize_text(text):
+def normalize_text(text: str) -> str:
     text = re.sub(r"\s*\n\s*", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-def clean_value(val):
+def clean_value(val: str) -> str:
     for w in STOP_WORDS:
         if w in val:
             val = val.split(w)[0]
     return val.strip()
 
-def extract_text(pdf_file):
+def extract_text(pdf_file) -> str:
     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
     text = ""
     for page in doc:
         text += page.get_text()
     return normalize_text(text)
 
-def slice_sections(text):
+def slice_sections(text: str) -> dict:
     section_text = {}
     names = list(SECTIONS.keys())
 
@@ -227,22 +230,31 @@ def slice_sections(text):
 
     return section_text
 
-def extract_fields_from_section(section_body, fields):
+def extract_fields_from_section(section_body: str, fields: list) -> dict:
     data = {}
 
-    for field in fields:
+    for i, field in enumerate(fields):
         value = ""
-        label = re.escape(field.replace("(1)", "").replace("(2)", "")).replace("\\ ", "\\s+")
 
-        pattern = rf"{label}\s*(.+?)\s*(?=[A-Z][A-Za-z ]{{3,}}|$)"
+        base_field = field.replace("(1)", "").replace("(2)", "")
+        label = re.escape(base_field).replace("\\ ", "\\s+")
+
+        if i + 1 < len(fields):
+            next_base = fields[i + 1].replace("(1)", "").replace("(2)", "")
+            next_label = re.escape(next_base).replace("\\ ", "\\s+")
+            pattern = rf"{label}\s*(.*?)\s*(?={next_label})"
+        else:
+            pattern = rf"{label}\s*(.*)"
+
         match = re.search(pattern, section_body, re.IGNORECASE | re.DOTALL)
-
         if match:
             value = match.group(1).strip(" :-")
 
+        # Explicit empty override
         if field in EMPTY_ALLOWED_FIELDS:
             value = ""
 
+        # Incoterms split
         if field.startswith("Incoterns"):
             parts = value.split("Incoterns")
             if field == "Incoterns (1)":
@@ -250,6 +262,7 @@ def extract_fields_from_section(section_body, fields):
             elif field == "Incoterns (2)" and len(parts) > 1:
                 value = parts[1].strip()
 
+        # Trim ONLY numeric/code fields
         if field in SINGLE_TOKEN_FIELDS and value:
             value = value.split()[0]
 
@@ -258,7 +271,7 @@ def extract_fields_from_section(section_body, fields):
 
     return data
 
-def extract_all_fields(text):
+def extract_all_fields(text: str) -> dict:
     all_data = {}
     sections = slice_sections(text)
 
@@ -268,7 +281,7 @@ def extract_all_fields(text):
 
     return all_data
 
-def to_excel(df):
+def to_excel(df: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
@@ -287,7 +300,7 @@ uploaded_files = st.file_uploader(
 if uploaded_files and st.button("🚀 Extract Data"):
     rows = []
 
-    with st.spinner("Extracting data..."):
+    with st.spinner("Extracting data from PDFs..."):
         for file in uploaded_files:
             text = extract_text(file)
             record = extract_all_fields(text)
@@ -300,6 +313,6 @@ if uploaded_files and st.button("🚀 Extract Data"):
     st.download_button(
         "⬇️ Download Excel",
         data=to_excel(df),
-        file_name="zsub_final_corrected_output.xlsx",
+        file_name="zsub_final_stable_output.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
