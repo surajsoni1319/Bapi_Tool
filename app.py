@@ -8,13 +8,12 @@ from io import BytesIO
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="ZSUB PDF Extractor", layout="wide")
-st.title("📄 ZSUB PDF Data Extractor (Section-Aware)")
-st.caption("Enterprise-grade | No OCR | SAP-safe")
+st.title("📄 ZSUB PDF Data Extractor (Final – Section Aware)")
+st.caption("No OCR | SAP-safe | Production Ready")
 
 # -------------------------------------------------
-# SECTION → FIELD MAPPING
+# SECTION → FIELD MAPPING (ORDER MATTERS)
 # -------------------------------------------------
-
 SECTIONS = {
     "Customer Creation": [
         "Type of Customer",
@@ -118,7 +117,20 @@ SECTIONS = {
         "Credit Limit (In Rs.)"
     ],
 
-    "Initiator Details": [
+    # SALES HIERARCHY (critical missing section earlier)
+    "Regional Head to be mapped": [
+        "Regional Head to be mapped",
+        "Zonal Head to be mapped",
+        "Sub-Zonal Head (RSM) to be mapped",
+        "Area Sales Manager to be mapped",
+        "Sales Officer to be mapped",
+        "Sales Promoter to be mapped",
+        "Sales Promoter Number",
+        "Internal control code",
+        "SAP CODE"
+    ],
+
+    "Initiator Name": [
         "Initiator Name",
         "Initiator Email ID",
         "Initiator Mobile Number",
@@ -139,18 +151,23 @@ SECTIONS = {
 }
 
 # -------------------------------------------------
-# FUNCTIONS
+# HELPERS
 # -------------------------------------------------
+def normalize_text(text: str) -> str:
+    text = re.sub(r"\s*\n\s*", " ", text)  # remove line breaks safely
+    text = re.sub(r"\s+", " ", text)       # normalize spaces
+    return text.strip()
 
-def extract_text(pdf_file):
+
+def extract_text(pdf_file) -> str:
     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
     text = ""
     for page in doc:
         text += page.get_text()
-    return re.sub(r"\s+", " ", text)
+    return normalize_text(text)
 
 
-def slice_sections(text):
+def slice_sections(text: str) -> dict:
     section_text = {}
     section_names = list(SECTIONS.keys())
 
@@ -171,23 +188,26 @@ def slice_sections(text):
     return section_text
 
 
-def extract_fields_from_section(section_body, fields):
+def extract_fields_from_section(section_body: str, fields: list) -> dict:
     data = {}
+
     for i, field in enumerate(fields):
-        label = re.escape(field)
+        # tolerate line breaks and multiple spaces in labels
+        label = re.escape(field).replace("\\ ", "\\s+")
 
         if i + 1 < len(fields):
-            next_label = re.escape(fields[i + 1])
+            next_label = re.escape(fields[i + 1]).replace("\\ ", "\\s+")
             pattern = rf"{label}\s*(.*?)\s*(?={next_label})"
         else:
             pattern = rf"{label}\s*(.*)"
 
         match = re.search(pattern, section_body, re.IGNORECASE | re.DOTALL)
         data[field] = match.group(1).strip(" :-") if match else ""
+
     return data
 
 
-def extract_all_fields(text):
+def extract_all_fields(text: str) -> dict:
     all_data = {}
     sections = slice_sections(text)
 
@@ -198,7 +218,7 @@ def extract_all_fields(text):
     return all_data
 
 
-def to_excel(df):
+def to_excel(df: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
@@ -207,7 +227,6 @@ def to_excel(df):
 # -------------------------------------------------
 # UI
 # -------------------------------------------------
-
 uploaded_files = st.file_uploader(
     "📤 Upload ZSUB PDFs",
     type=["pdf"],
@@ -217,20 +236,21 @@ uploaded_files = st.file_uploader(
 if uploaded_files and st.button("🚀 Extract Data"):
     rows = []
 
-    for file in uploaded_files:
-        text = extract_text(file)
-        record = extract_all_fields(text)
-        record["Source File"] = file.name
-        rows.append(record)
+    with st.spinner("Extracting data from PDFs..."):
+        for file in uploaded_files:
+            text = extract_text(file)
+            record = extract_all_fields(text)
+            record["Source File"] = file.name
+            rows.append(record)
 
     df = pd.DataFrame(rows)
 
-    st.subheader("📊 Extracted Data")
+    st.subheader("📊 Extracted Data Preview")
     st.dataframe(df, use_container_width=True)
 
     st.download_button(
         "⬇️ Download Excel",
         data=to_excel(df),
-        file_name="zsub_section_aware_output.xlsx",
+        file_name="zsub_final_extracted_output.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
