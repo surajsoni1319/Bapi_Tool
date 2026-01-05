@@ -1,16 +1,8 @@
-# Streamlit
-streamlit==1.29.0
 
-# Data processing
-pandas==2.0.3
-openpyxl==3.1.2
-
-# PDF processing
-pdfplumber==0.10.3
-pdfminer.six==20221105
-
-# Image handling (dependency of pdfplumber)
-Pillow==9.5.0
-
-# Utilities
-python-dateutil==2.8.2
+streamlit
+pandas
+openpyxl
+pdfplumber
+pdfminer.six
+Pillow
+python-dateutil
