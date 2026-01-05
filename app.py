@@ -1,281 +1,236 @@
 import streamlit as st
-import fitz  # PyMuPDF
+import fitz
 import pandas as pd
 import re
 from io import BytesIO
 
-# Page config
-st.set_page_config(page_title="PDF Customer Data Extractor", page_icon="📄", layout="wide")
+# -------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------
+st.set_page_config(page_title="ZSUB PDF Extractor", layout="wide")
+st.title("📄 ZSUB PDF Data Extractor (Section-Aware)")
+st.caption("Enterprise-grade | No OCR | SAP-safe")
 
-# Title
-st.title("📄 PDF Customer Data Extractor")
-st.markdown("Extracts exactly as ilovepdf.com does")
-st.markdown("---")
+# -------------------------------------------------
+# SECTION → FIELD MAPPING
+# -------------------------------------------------
 
-# Section headers to include
-SECTION_HEADERS = [
-    'Customer Creation', 'Customer Address', 'GSTIN Details', 
-    'PAN Details', 'Bank Details', 'Aadhaar Details', 
-    'Supporting Document', 'Zone Details', 'Other Details', 
-    'Duplicity Check'
-]
+SECTIONS = {
+    "Customer Creation": [
+        "Type of Customer",
+        "Name of Customer",
+        "Company Code",
+        "Customer Group",
+        "Sales Group",
+        "Region",
+        "Zone",
+        "Sub Zone",
+        "State",
+        "Sales Office",
+        "SAP Dealer code to be mapped Search Term 2",
+        "Search Term 1- Old customer code",
+        "Search Term 2 - District",
+        "Mobile Number",
+        "E-Mail ID",
+        "Lattitude",
+        "Longitude"
+    ],
 
-# Multi-line field continuations to skip
-FIELD_CONTINUATIONS = [
-    "Legal Name)",
-    "2",  # After SAP Dealer code
-    "Sales Officer",  # After Logistics team
-    "Master list, if found.",  # After Selection of Available
-    "be provided by Logistics team",  # After If NEW T Zone
-    "as per checque received by Customer / Dealer"  # After Security Deposit
-]
+    "Customer Address": [
+        "Name of the Customers (Trade Name or Legal Name)",
+        "Mobile Number",
+        "E-mail",
+        "Address 1",
+        "Address 2",
+        "Address 3",
+        "Address 4",
+        "PIN",
+        "City",
+        "District",
+        "State",
+        "Whatsapp No.",
+        "Date of Birth",
+        "Date of Anniversary",
+        "Counter Potential - Maximum",
+        "Counter Potential - Minimum"
+    ],
 
-def extract_data_from_pdf(pdf_file):
-    """Extract PDF exactly like ilovepdf.com - simple 2-column table"""
-    
-    # Read PDF
-    pdf_bytes = pdf_file.read()
-    pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-    
-    # Get all text
-    full_text = ""
-    for page_num in range(pdf_document.page_count):
-        page = pdf_document[page_num]
-        full_text += page.get_text()
-    
-    pdf_document.close()
-    
-    # Split into lines
-    lines = full_text.split('\n')
-    
-    # Extract as simple table
-    table_data = []
-    skip_next = False
-    
-    for i, line in enumerate(lines):
-        line = line.strip()
-        
-        if not line:
+    "GSTIN Details": [
+        "Is GST Present",
+        "GSTIN",
+        "Trade Name",
+        "Legal Name",
+        "Reg Date",
+        "City",
+        "Type",
+        "Building No.",
+        "District Code",
+        "State Code",
+        "Street",
+        "PIN Code"
+    ],
+
+    "PAN Details": [
+        "PAN",
+        "PAN Holder Name",
+        "PAN Status",
+        "PAN - Aadhaar Linking Status"
+    ],
+
+    "Bank Details": [
+        "IFSC Number",
+        "Account Number",
+        "Name of Account Holder",
+        "Bank Name",
+        "Bank Branch"
+    ],
+
+    "Aadhaar Details": [
+        "Is Aadhaar Linked with Mobile?",
+        "Aadhaar Number",
+        "Name",
+        "Gender",
+        "DOB",
+        "Address",
+        "PIN",
+        "City",
+        "State"
+    ],
+
+    "Zone Details": [
+        "Logistics Transportation Zone",
+        "Transportation Zone Description",
+        "Transportation Zone Code",
+        "Postal Code",
+        "Logistics team to vet the T zone selected by Sales Officer",
+        "Selection of Available T Zones from T Zone Master list, if found.",
+        "If NEW T Zone need to be created, details to be provided by Logistics team"
+    ],
+
+    "Other Details": [
+        "Date of Appointment",
+        "Delivering Plant",
+        "Plant Name",
+        "Plant Code",
+        "Incoterns",
+        "Incoterns Code",
+        "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer",
+        "Credit Limit (In Rs.)"
+    ],
+
+    "Initiator Details": [
+        "Initiator Name",
+        "Initiator Email ID",
+        "Initiator Mobile Number",
+        "Created By Customer UserID",
+        "Sales Head Name",
+        "Sales Head Email",
+        "Sales Head Mobile Number"
+    ],
+
+    "Duplicity Check": [
+        "Extra2",
+        "PAN Result",
+        "Mobile Number Result",
+        "Email Result",
+        "GST Result",
+        "Final Result"
+    ]
+}
+
+# -------------------------------------------------
+# FUNCTIONS
+# -------------------------------------------------
+
+def extract_text(pdf_file):
+    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return re.sub(r"\s+", " ", text)
+
+
+def slice_sections(text):
+    section_text = {}
+    section_names = list(SECTIONS.keys())
+
+    for i, section in enumerate(section_names):
+        start = text.find(section)
+        if start == -1:
+            section_text[section] = ""
             continue
-        
-        # Check if this line should be skipped (it's a field continuation)
-        if skip_next:
-            skip_next = False
-            continue
-        
-        # Check if line is a field continuation
-        if line in FIELD_CONTINUATIONS:
-            continue
-        
-        # Section headers - add with empty value
-        if line in SECTION_HEADERS:
-            table_data.append([line, ""])
-            continue
-        
-        # Try to extract field and value
-        field = ""
-        value = ""
-        
-        # Method 1: Split by tab
-        if '\t' in line:
-            parts = line.split('\t', 1)
-            field = parts[0].strip()
-            value = parts[1].strip() if len(parts) > 1 else ""
-        
-        # Method 2: Split by 2+ spaces
-        elif '  ' in line:
-            parts = re.split(r'\s{2,}', line, 1)
-            field = parts[0].strip()
-            value = parts[1].strip() if len(parts) > 1 else ""
-        
-        # Method 3: No separator - just field name
+
+        start += len(section)
+
+        if i + 1 < len(section_names):
+            end = text.find(section_names[i + 1], start)
+            section_text[section] = text[start:end] if end != -1 else text[start:]
         else:
-            field = line
-            value = ""
-        
-        # Check if this is a multi-line field that needs special handling
-        if "SAP Dealer code to be mapped Search Term" in field:
-            field = "SAP Dealer code to be mapped Search Term 2"
-            # Skip next 2 lines ("2" and get the actual value from line after)
-            if i + 2 < len(lines):
-                value = lines[i + 2].strip()
-        
-        elif "Name of the Customers (Trade Name or" in field:
-            field = "Name of the Customers (Trade Name or Legal Name)"
-            # Skip "Legal Name)" and get value from next line
-            if i + 2 < len(lines):
-                potential_value = lines[i + 2].strip()
-                # Make sure it's not another field
-                if potential_value and not any(h in potential_value for h in SECTION_HEADERS):
-                    value = potential_value
-        
-        elif "Security Deposit Amount details to filled up," in field:
-            field = "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"
-            # Skip continuation line and get value
-            if i + 2 < len(lines):
-                value = lines[i + 2].strip()
-        
-        elif "Logistics team to vet the T zone selected by" in field:
-            field = "Logistics team to vet the T zone selected by Sales Officer"
-            # Skip continuation and get value
-            if i + 2 < len(lines):
-                value = lines[i + 2].strip()
-        
-        elif "Selection of Available T Zones from T Zone" in field:
-            field = "Selection of Available T Zones from T Zone Master list, if found."
-            # Skip continuation and get value
-            if i + 2 < len(lines):
-                value = lines[i + 2].strip()
-        
-        elif "If NEW T Zone need to be created, details to" in field:
-            field = "If NEW T Zone need to be created, details to be provided by Logistics team"
-            # Skip continuation and get value
-            if i + 2 < len(lines):
-                value = lines[i + 2].strip()
-        
-        # Add to table
-        table_data.append([field, value])
-    
-    # Create DataFrame
-    df = pd.DataFrame(table_data, columns=['Field', 'Value'])
-    
-    return df
+            section_text[section] = text[start:]
 
-def convert_df_to_csv(df):
-    return df.to_csv(index=False).encode('utf-8')
+    return section_text
 
-def convert_df_to_excel(df):
+
+def extract_fields_from_section(section_body, fields):
+    data = {}
+    for i, field in enumerate(fields):
+        label = re.escape(field)
+
+        if i + 1 < len(fields):
+            next_label = re.escape(fields[i + 1])
+            pattern = rf"{label}\s*(.*?)\s*(?={next_label})"
+        else:
+            pattern = rf"{label}\s*(.*)"
+
+        match = re.search(pattern, section_body, re.IGNORECASE | re.DOTALL)
+        data[field] = match.group(1).strip(" :-") if match else ""
+    return data
+
+
+def extract_all_fields(text):
+    all_data = {}
+    sections = slice_sections(text)
+
+    for section, fields in SECTIONS.items():
+        section_data = extract_fields_from_section(sections.get(section, ""), fields)
+        all_data.update(section_data)
+
+    return all_data
+
+
+def to_excel(df):
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Customer Data')
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
     return output.getvalue()
 
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Options")
-    show_empty = st.checkbox("Show empty fields", value=True)
-    show_stats = st.checkbox("Show statistics", value=True)
-    st.markdown("---")
-    st.markdown("### 🎯 Target")
-    st.success("101 rows")
+# -------------------------------------------------
+# UI
+# -------------------------------------------------
 
-# File uploader
-uploaded_file = st.file_uploader("Choose a PDF file", type=['pdf'])
+uploaded_files = st.file_uploader(
+    "📤 Upload ZSUB PDFs",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
-if uploaded_file is not None:
-    st.success(f"✅ File uploaded: {uploaded_file.name}")
-    
-    if st.button("🚀 Extract Data", type="primary", use_container_width=True):
-        with st.spinner("Extracting data from PDF..."):
-            try:
-                uploaded_file.seek(0)
-                
-                # Extract data
-                df = extract_data_from_pdf(uploaded_file)
-                
-                # Filter empty if needed
-                display_df = df.copy()
-                if not show_empty:
-                    display_df = display_df[display_df['Value'] != ""]
-                
-                # Calculate stats
-                total_rows = len(df)
-                filled_rows = len(df[df['Value'] != ""])
-                empty_rows = total_rows - filled_rows
-                row_diff = total_rows - 101
-                
-                # Show result
-                if row_diff == 0:
-                    st.success(f"🎉 Perfect! Extracted exactly 101 rows!")
-                elif row_diff > 0:
-                    st.warning(f"⚠️ Extracted {total_rows} rows ({row_diff} more than expected)")
-                else:
-                    st.warning(f"⚠️ Extracted {total_rows} rows ({abs(row_diff)} fewer than expected)")
-                
-                if show_stats:
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Total Rows", total_rows, delta=f"{row_diff:+d}" if row_diff != 0 else "✓")
-                    with col2:
-                        st.metric("Filled", filled_rows)
-                    with col3:
-                        st.metric("Empty", empty_rows)
-                    with col4:
-                        st.metric("Target", 101)
-                
-                st.subheader("📋 Extracted Data")
-                st.dataframe(display_df, use_container_width=True, height=600)
-                
-                # Show specific multi-line fields for verification
-                with st.expander("🔍 Verify Multi-line Fields"):
-                    multiline_fields = [
-                        "SAP Dealer code to be mapped Search Term 2",
-                        "Name of the Customers (Trade Name or Legal Name)",
-                        "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer",
-                        "Logistics team to vet the T zone selected by Sales Officer",
-                        "Selection of Available T Zones from T Zone Master list, if found.",
-                        "If NEW T Zone need to be created, details to be provided by Logistics team"
-                    ]
-                    
-                    for field in multiline_fields:
-                        row = df[df['Field'] == field]
-                        if not row.empty:
-                            value = row.iloc[0]['Value']
-                            st.write(f"**{field}**: `{value if value else '(empty)'}`")
-                
-                st.subheader("📥 Download Options")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    csv_data = convert_df_to_csv(df)
-                    st.download_button(
-                        "📄 Download as CSV",
-                        csv_data,
-                        f"extracted_{uploaded_file.name.replace('.pdf', '')}.csv",
-                        "text/csv",
-                        use_container_width=True
-                    )
-                
-                with col2:
-                    excel_data = convert_df_to_excel(df)
-                    st.download_button(
-                        "📊 Download as Excel",
-                        excel_data,
-                        f"extracted_{uploaded_file.name.replace('.pdf', '')}.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
-                with st.expander("Error Details"):
-                    st.code(str(e))
-                    import traceback
-                    st.code(traceback.format_exc())
+if uploaded_files and st.button("🚀 Extract Data"):
+    rows = []
 
-else:
-    st.info("👆 Upload a PDF file to begin extraction")
-    
-    with st.expander("📖 How This Works"):
-        st.markdown("""
-        ### Simple 2-Column Extraction (Like ilovepdf.com)
-        
-        **Method:**
-        1. Reads PDF line by line
-        2. Splits each line into Field | Value
-        3. Handles multi-line field names specially
-        4. Includes section headers with empty values
-        
-        **Multi-line Fields Handled:**
-        - SAP Dealer code (3 lines → 1 row)
-        - Name of Customers (2 lines → 1 row)
-        - Security Deposit (2 lines → 1 row)
-        - Logistics team (2 lines → 1 row)
-        - Selection of T Zones (2 lines → 1 row)
-        - If NEW T Zone (2 lines → 1 row)
-        
-        **Result:** Exactly 101 rows matching your PDF!
-        """)
+    for file in uploaded_files:
+        text = extract_text(file)
+        record = extract_all_fields(text)
+        record["Source File"] = file.name
+        rows.append(record)
 
-st.markdown("---")
-st.markdown("Built with ❤️ using Streamlit | Simple extraction")
+    df = pd.DataFrame(rows)
+
+    st.subheader("📊 Extracted Data")
+    st.dataframe(df, use_container_width=True)
+
+    st.download_button(
+        "⬇️ Download Excel",
+        data=to_excel(df),
+        file_name="zsub_section_aware_output.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
