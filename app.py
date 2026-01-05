@@ -8,12 +8,45 @@ from io import BytesIO
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="ZSUB PDF Extractor", layout="wide")
-st.title("📄 ZSUB PDF Data Extractor (Final – Section Aware)")
-st.caption("No OCR | SAP-safe | Production Ready")
+st.title("📄 ZSUB PDF Data Extractor (Final Corrected)")
+st.caption("Section-aware | Line-break safe | SAP-ready")
 
 # -------------------------------------------------
-# SECTION → FIELD MAPPING (ORDER MATTERS)
+# GLOBAL CONTROLS
 # -------------------------------------------------
+
+STOP_WORDS = [
+    "Supporting Document",
+    "Zone Details",
+    "Other Details",
+    "PAN Details",
+    "Bank Details",
+    "Aadhaar Details"
+]
+
+EMPTY_ALLOWED_FIELDS = {
+    "If NEW T Zone need to be created, details to be provided by Logistics team"
+}
+
+SINGLE_TOKEN_FIELDS = {
+    "SAP Dealer code to be mapped Search Term 2",
+    "Regional Head to be mapped",
+    "Zonal Head to be mapped",
+    "Sub-Zonal Head (RSM) to be mapped",
+    "Area Sales Manager to be mapped",
+    "Sales Officer to be mapped",
+    "Sales Promoter Number",
+    "Transportation Zone Code",
+    "Plant Code",
+    "IFSC Number",
+    "Account Number",
+    "Sales Head Mobile Number"
+}
+
+# -------------------------------------------------
+# SECTION → FIELD MAPPING
+# -------------------------------------------------
+
 SECTIONS = {
     "Customer Creation": [
         "Type of Customer",
@@ -111,13 +144,13 @@ SECTIONS = {
         "Delivering Plant",
         "Plant Name",
         "Plant Code",
-        "Incoterns",
+        "Incoterns (1)",
+        "Incoterns (2)",
         "Incoterns Code",
         "Security Deposit Amount details to filled up, as per checque received by Customer / Dealer",
         "Credit Limit (In Rs.)"
     ],
 
-    # SALES HIERARCHY (critical missing section earlier)
     "Regional Head to be mapped": [
         "Regional Head to be mapped",
         "Zonal Head to be mapped",
@@ -153,25 +186,30 @@ SECTIONS = {
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
-def normalize_text(text: str) -> str:
-    text = re.sub(r"\s*\n\s*", " ", text)  # remove line breaks safely
-    text = re.sub(r"\s+", " ", text)       # normalize spaces
+
+def normalize_text(text):
+    text = re.sub(r"\s*\n\s*", " ", text)
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
 
+def clean_value(val):
+    for w in STOP_WORDS:
+        if w in val:
+            val = val.split(w)[0]
+    return val.strip()
 
-def extract_text(pdf_file) -> str:
+def extract_text(pdf_file):
     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
     text = ""
     for page in doc:
         text += page.get_text()
     return normalize_text(text)
 
-
-def slice_sections(text: str) -> dict:
+def slice_sections(text):
     section_text = {}
-    section_names = list(SECTIONS.keys())
+    names = list(SECTIONS.keys())
 
-    for i, section in enumerate(section_names):
+    for i, section in enumerate(names):
         start = text.find(section)
         if start == -1:
             section_text[section] = ""
@@ -179,46 +217,58 @@ def slice_sections(text: str) -> dict:
 
         start += len(section)
 
-        if i + 1 < len(section_names):
-            end = text.find(section_names[i + 1], start)
+        if i + 1 < len(names):
+            pattern = re.escape(names[i + 1]).replace("\\ ", "\\s+")
+            m = re.search(pattern, text[start:], re.IGNORECASE)
+            end = start + m.start() if m else -1
             section_text[section] = text[start:end] if end != -1 else text[start:]
         else:
             section_text[section] = text[start:]
 
     return section_text
 
-
-def extract_fields_from_section(section_body: str, fields: list) -> dict:
+def extract_fields_from_section(section_body, fields):
     data = {}
 
-    for i, field in enumerate(fields):
-        # tolerate line breaks and multiple spaces in labels
-        label = re.escape(field).replace("\\ ", "\\s+")
+    for field in fields:
+        value = ""
+        label = re.escape(field.replace("(1)", "").replace("(2)", "")).replace("\\ ", "\\s+")
 
-        if i + 1 < len(fields):
-            next_label = re.escape(fields[i + 1]).replace("\\ ", "\\s+")
-            pattern = rf"{label}\s*(.*?)\s*(?={next_label})"
-        else:
-            pattern = rf"{label}\s*(.*)"
-
+        pattern = rf"{label}\s*(.+?)\s*(?=[A-Z][A-Za-z ]{{3,}}|$)"
         match = re.search(pattern, section_body, re.IGNORECASE | re.DOTALL)
-        data[field] = match.group(1).strip(" :-") if match else ""
+
+        if match:
+            value = match.group(1).strip(" :-")
+
+        if field in EMPTY_ALLOWED_FIELDS:
+            value = ""
+
+        if field.startswith("Incoterns"):
+            parts = value.split("Incoterns")
+            if field == "Incoterns (1)":
+                value = parts[0].strip()
+            elif field == "Incoterns (2)" and len(parts) > 1:
+                value = parts[1].strip()
+
+        if field in SINGLE_TOKEN_FIELDS and value:
+            value = value.split()[0]
+
+        value = clean_value(value)
+        data[field] = value
 
     return data
 
-
-def extract_all_fields(text: str) -> dict:
+def extract_all_fields(text):
     all_data = {}
     sections = slice_sections(text)
 
     for section, fields in SECTIONS.items():
-        section_data = extract_fields_from_section(sections.get(section, ""), fields)
-        all_data.update(section_data)
+        extracted = extract_fields_from_section(sections.get(section, ""), fields)
+        all_data.update(extracted)
 
     return all_data
 
-
-def to_excel(df: pd.DataFrame) -> bytes:
+def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
@@ -227,6 +277,7 @@ def to_excel(df: pd.DataFrame) -> bytes:
 # -------------------------------------------------
 # UI
 # -------------------------------------------------
+
 uploaded_files = st.file_uploader(
     "📤 Upload ZSUB PDFs",
     type=["pdf"],
@@ -236,7 +287,7 @@ uploaded_files = st.file_uploader(
 if uploaded_files and st.button("🚀 Extract Data"):
     rows = []
 
-    with st.spinner("Extracting data from PDFs..."):
+    with st.spinner("Extracting data..."):
         for file in uploaded_files:
             text = extract_text(file)
             record = extract_all_fields(text)
@@ -244,13 +295,11 @@ if uploaded_files and st.button("🚀 Extract Data"):
             rows.append(record)
 
     df = pd.DataFrame(rows)
-
-    st.subheader("📊 Extracted Data Preview")
     st.dataframe(df, use_container_width=True)
 
     st.download_button(
         "⬇️ Download Excel",
         data=to_excel(df),
-        file_name="zsub_final_extracted_output.xlsx",
+        file_name="zsub_final_corrected_output.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
