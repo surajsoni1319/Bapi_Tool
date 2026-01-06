@@ -9,8 +9,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📄 SAP Customer PDF → Final Excel")
-st.write("PDF → Raw row data → Final SAP-ready Excel (single flow)")
+st.title("📄 SAP Customer Creation PDF → Final Excel")
+st.write("PDF → Raw rows → Section-aware extraction → Final SAP-ready Excel")
 st.markdown("---")
 
 uploaded_files = st.file_uploader(
@@ -20,7 +20,7 @@ uploaded_files = st.file_uploader(
 )
 
 # =====================================================
-# REQUIRED OUTPUT FIELDS (EXACT)
+# REQUIRED FINAL FIELDS (EXACT)
 # =====================================================
 FIELDS = [
     "Type of Customer","Name of Customer","Company Code","Customer Group",
@@ -38,7 +38,8 @@ FIELDS = [
     "City (GST)","Type","Building No.","District Code","State Code",
     "Street","PIN Code",
     "PAN","PAN Holder Name","PAN Status","PAN - Aadhaar Linking Status",
-    "IFSC Number","Account Number","Name of Account Holder","Bank Name","Bank Branch",
+    "IFSC Number","Account Number","Name of Account Holder",
+    "Bank Name","Bank Branch",
     "Is Aadhaar Linked with Mobile?","Aadhaar Number","Name","Gender","DOB",
     "Address (Aadhaar)","PIN (Aadhaar)","City (Aadhaar)","State (Aadhaar)",
     "Logistics Transportation Zone","Transportation Zone Description",
@@ -55,128 +56,143 @@ FIELDS = [
     "Sales Promoter Number","Internal control code","SAP CODE",
     "Initiator Name","Initiator Email ID","Initiator Mobile Number",
     "Created By Customer UserID","Sales Head Name","Sales Head Email",
-    "Sales Head Mobile Number","Extra2","PAN Result","Mobile Number Result",
-    "Email Result","GST Result","Final Result"
+    "Sales Head Mobile Number","Extra2","PAN Result",
+    "Mobile Number Result","Email Result","GST Result","Final Result"
 ]
 
 # =====================================================
-# STEP 1: PDF → RAW ROW DATA
+# STEP 1: PDF → RAW ROWS (WITH LINE MERGING)
 # =====================================================
 def pdf_to_raw_rows(pdf_file):
     rows = []
-
     with pdfplumber.open(pdf_file) as pdf:
         for page_no, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
             if not text:
                 continue
 
+            buffer = ""
             for line_no, line in enumerate(text.split("\n"), start=1):
+                line = line.strip()
+
+                if buffer:
+                    line = buffer + " " + line
+                    buffer = ""
+
+                if line.endswith("(") or line.endswith(",") or line.endswith("to"):
+                    buffer = line
+                    continue
+
                 rows.append({
                     "Page": page_no,
                     "Line No": line_no,
-                    "Text": line.strip()
+                    "Text": line
                 })
 
     return pd.DataFrame(rows)
 
 # =====================================================
-# HELPER FUNCTIONS ON RAW DATA
+# HELPERS ON RAW DATA
 # =====================================================
-def value_same_line(df, label):
-    match = df[df["Text"].str.startswith(label + " ")]
-    if not match.empty:
-        return match.iloc[0]["Text"].replace(label, "").strip()
-    return ""
+def same_line(df, label):
+    m = df[df["Text"].str.startswith(label + " ")]
+    return m.iloc[0]["Text"].replace(label, "").strip() if not m.empty else ""
 
-def value_next_line(df, label):
+def next_line(df, label):
     idx = df.index[df["Text"] == label]
-    if not idx.empty and idx[0] + 1 in df.index:
-        return df.loc[idx[0] + 1, "Text"]
-    return ""
+    return df.loc[idx[0] + 1, "Text"] if not idx.empty and idx[0] + 1 in df.index else ""
 
 # =====================================================
-# STEP 2: RAW ROWS → FINAL SAP ROW
+# STEP 2: RAW ROWS → FINAL ROW
 # =====================================================
 def build_final_row(df):
     row = {f: "" for f in FIELDS}
 
-    # Header
-    row["Type of Customer"] = value_same_line(df, "Type of Customer")
-    row["Name of Customer"] = value_same_line(df, "Name of Customer")
-    row["Company Code"] = value_same_line(df, "Company Code")
-    row["Customer Group"] = value_same_line(df, "Customer Group")
-    row["Sales Group"] = value_same_line(df, "Sales Group")
-    row["Region"] = value_same_line(df, "Region")
-    row["Zone"] = value_same_line(df, "Zone")
-    row["Sub Zone"] = value_same_line(df, "Sub Zone")
-    row["State"] = value_same_line(df, "State")
-    row["Sales Office"] = value_same_line(df, "Sales Office")
+    # ---------- HEADER ----------
+    for f in [
+        "Type of Customer","Name of Customer","Company Code","Customer Group",
+        "Sales Group","Region","Zone","Sub Zone","State","Sales Office",
+        "Mobile Number","E-Mail ID","Lattitude","Longitude",
+        "Whatsapp No.","Date of Birth","Date of Anniversary",
+        "Counter Potential - Maximum","Counter Potential - Minimum"
+    ]:
+        row[f] = same_line(df, f)
 
-    # Search Terms
-    row["SAP Dealer code to be mapped Search Term 2"] = value_same_line(
+    # ---------- SEARCH TERM ----------
+    row["SAP Dealer code to be mapped Search Term 2"] = same_line(
         df, "SAP Dealer code to be mapped Search Term"
     )
 
-    # Contact & Geo
-    row["Mobile Number"] = value_same_line(df, "Mobile Number")
-    row["E-Mail ID"] = value_same_line(df, "E-Mail ID")
-    row["Lattitude"] = value_same_line(df, "Lattitude")
-    row["Longitude"] = value_same_line(df, "Longitude")
+    # ---------- ADDRESS ----------
+    row["Address 1"] = same_line(df, "Address 1")
+    row["Address 2"] = same_line(df, "Address 2")
+    row["Address 3"] = next_line(df, "Address 3")
+    row["Address 4"] = next_line(df, "Address 4")
+    row["PIN"] = same_line(df, "PIN")
+    row["City"] = same_line(df, "City")
+    row["District"] = same_line(df, "District")
 
-    # Address
-    row["Address 1"] = value_same_line(df, "Address 1")
-    row["Address 2"] = value_same_line(df, "Address 2")
-    row["Address 3"] = value_next_line(df, "Address 3")
-    row["Address 4"] = value_next_line(df, "Address 4")
-    row["PIN"] = value_same_line(df, "PIN")
-    row["City"] = value_same_line(df, "City")
-    row["District"] = value_same_line(df, "District")
-    row["Whatsapp No."] = value_same_line(df, "Whatsapp No.")
+    # ---------- GST BLOCK ----------
+    gst_idx = df.index[df["Text"] == "GSTIN Details"]
+    if not gst_idx.empty:
+        i = gst_idx[0]
+        seq = [
+            "Is GST Present","GSTIN","Trade Name","Legal Name","Reg Date",
+            "City (GST)","Type","Building No.","District Code",
+            "State Code","Street","PIN Code"
+        ]
+        for j, field in enumerate(seq, start=1):
+            row[field] = df.loc[i + j, "Text"]
 
-    # Dates & Counters
-    row["Date of Birth"] = value_same_line(df, "Date of Birth")
-    row["Date of Anniversary"] = value_same_line(df, "Date of Anniversary")
-    row["Counter Potential - Maximum"] = value_same_line(df, "Counter Potential - Maximum")
-    row["Counter Potential - Minimum"] = value_same_line(df, "Counter Potential - Minimum")
+    # ---------- PAN ----------
+    row["PAN"] = same_line(df, "PAN")
+    row["PAN Holder Name"] = same_line(df, "PAN Holder Name")
+    row["PAN Status"] = same_line(df, "PAN Status")
+    row["PAN - Aadhaar Linking Status"] = same_line(df, "PAN - Aadhaar Linking Status")
 
-    # GST / PAN
-    row["Is GST Present"] = value_same_line(df, "Is GST Present")
-    row["PAN"] = value_same_line(df, "PAN")
-    row["PAN Holder Name"] = value_same_line(df, "PAN Holder Name")
-    row["PAN Status"] = value_same_line(df, "PAN Status")
-    row["PAN - Aadhaar Linking Status"] = value_same_line(df, "PAN - Aadhaar Linking Status")
+    # ---------- BANK ----------
+    for f in [
+        "IFSC Number","Account Number","Name of Account Holder",
+        "Bank Name","Bank Branch"
+    ]:
+        row[f] = same_line(df, f)
 
-    # Bank
-    row["IFSC Number"] = value_same_line(df, "IFSC Number")
-    row["Account Number"] = value_same_line(df, "Account Number")
-    row["Name of Account Holder"] = value_same_line(df, "Name of Account Holder")
-    row["Bank Name"] = value_same_line(df, "Bank Name")
-    row["Bank Branch"] = value_same_line(df, "Bank Branch")
+    # ---------- AADHAAR BLOCK ----------
+    ad_idx = df.index[df["Text"] == "Aadhaar Details"]
+    if not ad_idx.empty:
+        i = ad_idx[0]
+        seq = [
+            "Is Aadhaar Linked with Mobile?","Aadhaar Number","Name",
+            "Gender","DOB","Address (Aadhaar)",
+            "PIN (Aadhaar)","City (Aadhaar)","State (Aadhaar)"
+        ]
+        for j, field in enumerate(seq, start=1):
+            row[field] = df.loc[i + j, "Text"]
 
-    # Aadhaar
-    row["Is Aadhaar Linked with Mobile?"] = value_same_line(df, "Is Aadhaar Linked with Mobile?")
-    row["Aadhaar Number"] = value_same_line(df, "Aadhaar Number")
-    row["Name"] = value_same_line(df, "Name")
-    row["Gender"] = value_same_line(df, "Gender")
-    row["DOB"] = value_same_line(df, "DOB")
+    # ---------- LOGISTICS ----------
+    for f in [
+        "Logistics Transportation Zone",
+        "Transportation Zone Description",
+        "Transportation Zone Code"
+    ]:
+        row[f] = same_line(df, f)
 
-    # Logistics
-    row["Logistics Transportation Zone"] = value_same_line(df, "Logistics Transportation Zone")
-    row["Transportation Zone Description"] = value_same_line(df, "Transportation Zone Description")
-    row["Transportation Zone Code"] = value_same_line(df, "Transportation Zone Code")
+    # ---------- SECURITY DEPOSIT ----------
+    sd = df[df["Text"].str.startswith("Security Deposit Amount")]
+    if not sd.empty:
+        row["Security Deposit Amount details to filled up, as per checque received by Customer / Dealer"] = sd.iloc[0]["Text"]
 
-    # Results
-    row["PAN Result"] = value_same_line(df, "PAN Result")
-    row["Mobile Number Result"] = value_same_line(df, "Mobile Number Result")
-    row["Email Result"] = value_same_line(df, "Email Result")
-    row["GST Result"] = value_same_line(df, "GST Result")
-    row["Final Result"] = value_same_line(df, "Final Result")
+    # ---------- RESULTS ----------
+    for f in [
+        "PAN Result","Mobile Number Result",
+        "Email Result","GST Result","Final Result"
+    ]:
+        row[f] = same_line(df, f)
 
     return row
 
 # =====================================================
-# RUN PIPELINE
+# PIPELINE
 # =====================================================
 if uploaded_files:
     final_rows = []
@@ -189,7 +205,7 @@ if uploaded_files:
 
     final_df = pd.DataFrame(final_rows)
 
-    st.subheader("✅ Final SAP Output")
+    st.subheader("✅ Final Output (SAP-Ready)")
     st.dataframe(final_df, use_container_width=True)
 
     output = io.BytesIO()
