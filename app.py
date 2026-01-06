@@ -1,24 +1,26 @@
 import streamlit as st
+import pdfplumber
 import pandas as pd
 import io
 
 st.set_page_config(
-    page_title="RAW PDF → SAP Excel",
+    page_title="SAP PDF → Final Excel",
     page_icon="📄",
     layout="wide"
 )
 
-st.title("RAW Extracted PDF → Final SAP Excel")
-st.write("Uses raw extracted data. No PDF parsing. No guessing.")
+st.title("📄 SAP Customer PDF → Final Excel")
+st.write("PDF → Raw row data → Final SAP-ready Excel (single flow)")
 st.markdown("---")
 
-uploaded_file = st.file_uploader(
-    "Upload RAW extracted Excel (Source File | Page | Line No | Text)",
-    type=["xlsx"]
+uploaded_files = st.file_uploader(
+    "Upload SAP Customer Creation PDF(s)",
+    type=["pdf"],
+    accept_multiple_files=True
 )
 
 # =====================================================
-# REQUIRED FIELDS (EXACT ORDER)
+# REQUIRED OUTPUT FIELDS (EXACT)
 # =====================================================
 FIELDS = [
     "Type of Customer","Name of Customer","Company Code","Customer Group",
@@ -57,96 +59,137 @@ FIELDS = [
     "Email Result","GST Result","Final Result"
 ]
 
-def extract_value(df, label):
-    """Extract value from same-line text"""
+# =====================================================
+# STEP 1: PDF → RAW ROW DATA
+# =====================================================
+def pdf_to_raw_rows(pdf_file):
+    rows = []
+
+    with pdfplumber.open(pdf_file) as pdf:
+        for page_no, page in enumerate(pdf.pages, start=1):
+            text = page.extract_text()
+            if not text:
+                continue
+
+            for line_no, line in enumerate(text.split("\n"), start=1):
+                rows.append({
+                    "Page": page_no,
+                    "Line No": line_no,
+                    "Text": line.strip()
+                })
+
+    return pd.DataFrame(rows)
+
+# =====================================================
+# HELPER FUNCTIONS ON RAW DATA
+# =====================================================
+def value_same_line(df, label):
     match = df[df["Text"].str.startswith(label + " ")]
     if not match.empty:
         return match.iloc[0]["Text"].replace(label, "").strip()
     return ""
 
-def extract_next_line(df, label):
-    """Extract value from next line"""
+def value_next_line(df, label):
     idx = df.index[df["Text"] == label]
     if not idx.empty and idx[0] + 1 in df.index:
         return df.loc[idx[0] + 1, "Text"]
     return ""
 
+# =====================================================
+# STEP 2: RAW ROWS → FINAL SAP ROW
+# =====================================================
 def build_final_row(df):
     row = {f: "" for f in FIELDS}
 
     # Header
-    row["Type of Customer"] = extract_value(df, "Type of Customer")
-    row["Name of Customer"] = extract_value(df, "Name of Customer")
-    row["Company Code"] = extract_value(df, "Company Code")
-    row["Customer Group"] = extract_value(df, "Customer Group")
-    row["Sales Group"] = extract_value(df, "Sales Group")
-    row["Region"] = extract_value(df, "Region")
-    row["Zone"] = extract_value(df, "Zone")
-    row["Sub Zone"] = extract_value(df, "Sub Zone")
-    row["State"] = extract_value(df, "State")
-    row["Sales Office"] = extract_value(df, "Sales Office")
+    row["Type of Customer"] = value_same_line(df, "Type of Customer")
+    row["Name of Customer"] = value_same_line(df, "Name of Customer")
+    row["Company Code"] = value_same_line(df, "Company Code")
+    row["Customer Group"] = value_same_line(df, "Customer Group")
+    row["Sales Group"] = value_same_line(df, "Sales Group")
+    row["Region"] = value_same_line(df, "Region")
+    row["Zone"] = value_same_line(df, "Zone")
+    row["Sub Zone"] = value_same_line(df, "Sub Zone")
+    row["State"] = value_same_line(df, "State")
+    row["Sales Office"] = value_same_line(df, "Sales Office")
 
     # Search Terms
-    row["SAP Dealer code to be mapped Search Term 2"] = extract_value(
+    row["SAP Dealer code to be mapped Search Term 2"] = value_same_line(
         df, "SAP Dealer code to be mapped Search Term"
     )
 
-    # Contact
-    row["Mobile Number"] = extract_value(df, "Mobile Number")
-    row["E-Mail ID"] = extract_value(df, "E-Mail ID")
-    row["Lattitude"] = extract_value(df, "Lattitude")
-    row["Longitude"] = extract_value(df, "Longitude")
+    # Contact & Geo
+    row["Mobile Number"] = value_same_line(df, "Mobile Number")
+    row["E-Mail ID"] = value_same_line(df, "E-Mail ID")
+    row["Lattitude"] = value_same_line(df, "Lattitude")
+    row["Longitude"] = value_same_line(df, "Longitude")
 
     # Address
-    row["Address 1"] = extract_value(df, "Address 1")
-    row["Address 2"] = extract_value(df, "Address 2")
-    row["Address 3"] = extract_next_line(df, "Address 3")
-    row["Address 4"] = extract_next_line(df, "Address 4")
-    row["PIN"] = extract_value(df, "PIN")
-    row["City"] = extract_value(df, "City")
-    row["District"] = extract_value(df, "District")
-    row["Whatsapp No."] = extract_value(df, "Whatsapp No.")
+    row["Address 1"] = value_same_line(df, "Address 1")
+    row["Address 2"] = value_same_line(df, "Address 2")
+    row["Address 3"] = value_next_line(df, "Address 3")
+    row["Address 4"] = value_next_line(df, "Address 4")
+    row["PIN"] = value_same_line(df, "PIN")
+    row["City"] = value_same_line(df, "City")
+    row["District"] = value_same_line(df, "District")
+    row["Whatsapp No."] = value_same_line(df, "Whatsapp No.")
 
-    # PAN
-    row["PAN"] = extract_value(df, "PAN")
-    row["PAN Holder Name"] = extract_value(df, "PAN Holder Name")
-    row["PAN Status"] = extract_value(df, "PAN Status")
-    row["PAN - Aadhaar Linking Status"] = extract_value(df, "PAN - Aadhaar Linking Status")
+    # Dates & Counters
+    row["Date of Birth"] = value_same_line(df, "Date of Birth")
+    row["Date of Anniversary"] = value_same_line(df, "Date of Anniversary")
+    row["Counter Potential - Maximum"] = value_same_line(df, "Counter Potential - Maximum")
+    row["Counter Potential - Minimum"] = value_same_line(df, "Counter Potential - Minimum")
+
+    # GST / PAN
+    row["Is GST Present"] = value_same_line(df, "Is GST Present")
+    row["PAN"] = value_same_line(df, "PAN")
+    row["PAN Holder Name"] = value_same_line(df, "PAN Holder Name")
+    row["PAN Status"] = value_same_line(df, "PAN Status")
+    row["PAN - Aadhaar Linking Status"] = value_same_line(df, "PAN - Aadhaar Linking Status")
 
     # Bank
-    row["IFSC Number"] = extract_value(df, "IFSC Number")
-    row["Account Number"] = extract_value(df, "Account Number")
-    row["Name of Account Holder"] = extract_value(df, "Name of Account Holder")
-    row["Bank Name"] = extract_value(df, "Bank Name")
-    row["Bank Branch"] = extract_value(df, "Bank Branch")
+    row["IFSC Number"] = value_same_line(df, "IFSC Number")
+    row["Account Number"] = value_same_line(df, "Account Number")
+    row["Name of Account Holder"] = value_same_line(df, "Name of Account Holder")
+    row["Bank Name"] = value_same_line(df, "Bank Name")
+    row["Bank Branch"] = value_same_line(df, "Bank Branch")
 
     # Aadhaar
-    row["Is Aadhaar Linked with Mobile?"] = extract_value(df, "Is Aadhaar Linked with Mobile?")
-    row["Aadhaar Number"] = extract_value(df, "Aadhaar Number")
-    row["Name"] = extract_value(df, "Name")
-    row["Gender"] = extract_value(df, "Gender")
-    row["DOB"] = extract_value(df, "DOB")
+    row["Is Aadhaar Linked with Mobile?"] = value_same_line(df, "Is Aadhaar Linked with Mobile?")
+    row["Aadhaar Number"] = value_same_line(df, "Aadhaar Number")
+    row["Name"] = value_same_line(df, "Name")
+    row["Gender"] = value_same_line(df, "Gender")
+    row["DOB"] = value_same_line(df, "DOB")
 
     # Logistics
-    row["Logistics Transportation Zone"] = extract_value(df, "Logistics Transportation Zone")
-    row["Transportation Zone Description"] = extract_value(df, "Transportation Zone Description")
-    row["Transportation Zone Code"] = extract_value(df, "Transportation Zone Code")
+    row["Logistics Transportation Zone"] = value_same_line(df, "Logistics Transportation Zone")
+    row["Transportation Zone Description"] = value_same_line(df, "Transportation Zone Description")
+    row["Transportation Zone Code"] = value_same_line(df, "Transportation Zone Code")
 
     # Results
-    row["PAN Result"] = extract_value(df, "PAN Result")
-    row["Mobile Number Result"] = extract_value(df, "Mobile Number Result")
-    row["Email Result"] = extract_value(df, "Email Result")
-    row["GST Result"] = extract_value(df, "GST Result")
-    row["Final Result"] = extract_value(df, "Final Result")
+    row["PAN Result"] = value_same_line(df, "PAN Result")
+    row["Mobile Number Result"] = value_same_line(df, "Mobile Number Result")
+    row["Email Result"] = value_same_line(df, "Email Result")
+    row["GST Result"] = value_same_line(df, "GST Result")
+    row["Final Result"] = value_same_line(df, "Final Result")
 
     return row
 
-if uploaded_file:
-    raw_df = pd.read_excel(uploaded_file)
-    final_row = build_final_row(raw_df)
-    final_df = pd.DataFrame([final_row])
+# =====================================================
+# RUN PIPELINE
+# =====================================================
+if uploaded_files:
+    final_rows = []
 
-    st.subheader("✅ Final SAP-Ready Output")
+    for pdf in uploaded_files:
+        raw_df = pdf_to_raw_rows(pdf)
+        final_row = build_final_row(raw_df)
+        final_row["Source File"] = pdf.name
+        final_rows.append(final_row)
+
+    final_df = pd.DataFrame(final_rows)
+
+    st.subheader("✅ Final SAP Output")
     st.dataframe(final_df, use_container_width=True)
 
     output = io.BytesIO()
